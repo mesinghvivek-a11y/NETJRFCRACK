@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper.schema.json",
+  "title": "UGC NET paper file (one file per paper/shift)",
+  "type": "object",
+  "required": ["paper", "questions"],
+  "additionalProperties": false,
+  "properties": {
+    "paper": {
+      "type": "object",
+      "required": ["id", "subject", "year", "session", "exam_kind", "shift", "total_questions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "e.g. geo-2025-jun-s1" },
+        "subject": { "type": "string", "enum": ["geography", "paper1"] },
+        "year": { "type": "integer", "minimum": 2014 },
+        "session": { "enum": ["june", "december"] },
+        "exam_kind": { "enum": ["regular", "reexam"] },
+        "exam_date": { "type": "string", "format": "date" },
+        "shift": { "type": "integer", "minimum": 1 },
+        "total_questions": { "type": "integer", "enum": [50, 75, 100] }
+      }
+    },
+    "passages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "body"],
+        "additionalProperties": false,
+        "properties": { "id": { "type": "string" }, "body": { "$ref": "#/$defs/langBlock" } }
+      }
+    },
+    "questions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/question" } }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1 },
+    "image": { "type": "string", "description": "path inside the question-media bucket" },
+    "table": {
+      "type": "object",
+      "required": ["columns", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "columns": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "minItems": 1 }
+      }
+    },
+    "content": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "$ref": "#/$defs/text" },
+        "table": { "$ref": "#/$defs/table" },
+        "image": { "$ref": "#/$defs/image" }
+      }
+    },
+    "langBlock": {
+      "type": "object",
+      "required": ["en"],
+      "additionalProperties": false,
+      "properties": { "en": { "$ref": "#/$defs/content" }, "hi": { "$ref": "#/$defs/content" } }
+    },
+    "key": { "enum": ["A", "B", "C", "D"] },
+    "tag": {
+      "type": "object",
+      "required": ["unit"],
+      "additionalProperties": false,
+      "properties": {
+        "unit": { "type": "string", "pattern": "^[a-z0-9]+-u\\d{2}$" },
+        "topic": { "type": "string", "pattern": "^[a-z0-9]+-u\\d{2}-t\\d{2}$" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "required": ["id", "q_no", "format", "body", "options", "answer", "primary"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Z0-9]+(-[A-Z0-9]+)*-Q\\d{3}$", "description": "GEO-2025-JUN-S1-Q045" },
+        "q_no": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "canonical_id": { "type": "string", "description": "id of the first appearance if this question repeats in another shift" },
+        "format": { "enum": ["mcq", "matching", "assertion_reason", "statement", "table", "image"] },
+        "passage_id": { "type": "string" },
+        "body": { "$ref": "#/$defs/langBlock" },
+        "options": {
+          "type": "array", "minItems": 4, "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["key", "en"],
+            "additionalProperties": false,
+            "properties": { "key": { "$ref": "#/$defs/key" }, "en": { "$ref": "#/$defs/content" }, "hi": { "$ref": "#/$defs/content" } }
+          }
+        },
+        "answer": {
+          "type": "object",
+          "required": ["correct", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "correct": { "type": "array", "items": { "$ref": "#/$defs/key" }, "uniqueItems": true },
+            "status": { "enum": ["provisional", "final", "dropped", "multiple", "disputed"] },
+            "source": { "type": "string", "description": "e.g. nta-final-key, institute-x, cross-checked" }
+          }
+        },
+        "primary": { "$ref": "#/$defs/tag" },
+        "tags": { "type": "array", "items": { "$ref": "#/$defs/tag" }, "description": "secondary units/topics for browsing" },
+        "explanation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "summary": { "type": "string" },
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "A": { "type": "string" }, "B": { "type": "string" }, "C": { "type": "string" }, "D": { "type": "string" } }
+            },
+            "references": {
+              "type": "array",
+              "items": {
+                "type": "object", "required": ["book"], "additionalProperties": false,
+                "properties": { "book": { "type": "string" }, "page": { "type": "string" }, "note": { "type": "string" } }
+              }
+            },
+            "status": { "enum": ["draft", "verified"] }
+          }
+        },
+        "review_status": { "enum": ["draft", "verified"], "default": "draft" }
+      },
+      "allOf": [
+        { "if": { "properties": { "answer": { "properties": { "status": { "enum": ["final", "provisional"] } } } } },
+          "then": { "properties": { "answer": { "properties": { "correct": { "minItems": 1, "maxItems": 1 } } } } } },
+        { "if": { "properties": { "answer": { "properties": { "status": { "const": "multiple" } } } } },
+          "then": { "properties": { "answer": { "properties": { "correct": { "minItems": 2 } } } } } }
+      ]
+    }
+  }
+}

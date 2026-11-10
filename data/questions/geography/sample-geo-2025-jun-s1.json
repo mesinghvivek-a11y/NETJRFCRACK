@@ -1,0 +1,27 @@
+{
+  "paper": { "id": "geo-2025-jun-s1", "subject": "geography", "year": 2025, "session": "june", "exam_kind": "regular", "shift": 1, "total_questions": 100 },
+  "questions": [
+    {
+      "id": "GEO-2025-JUN-S1-Q001",
+      "q_no": 1,
+      "format": "mcq",
+      "body": { "en": { "text": "SAMPLE: Who proposed the theory of Continental Drift?" } },
+      "options": [
+        { "key": "A", "en": { "text": "Harry Hess" } },
+        { "key": "B", "en": { "text": "Alfred Wegener" } },
+        { "key": "C", "en": { "text": "W. M. Davis" } },
+        { "key": "D", "en": { "text": "Walther Penck" } }
+      ],
+      "answer": { "correct": ["B"], "status": "final", "source": "sample" },
+      "primary": { "unit": "geo-u01", "topic": "geo-u01-t01" },
+      "tags": [{ "unit": "geo-u08", "topic": "geo-u08-t03" }],
+      "explanation": {
+        "summary": "Wegener proposed continental drift in 1912.",
+        "options": { "A": "Hess proposed sea-floor spreading.", "B": "Correct.", "C": "Davis gave the geographical cycle.", "D": "Penck proposed an alternative slope-development model." },
+        "references": [{ "book": "Sample Book", "page": "12" }],
+        "status": "draft"
+      },
+      "review_status": "draft"
+    }
+  ]
+}

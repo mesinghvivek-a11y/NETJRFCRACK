@@ -1,0 +1,39 @@
+name: data
+
+on:
+  push:
+    paths: ["data/**", "scripts/**"]
+  pull_request:
+    paths: ["data/**", "scripts/**"]
+  workflow_dispatch:
+    inputs:
+      import:
+        description: "Import into Supabase after validating"
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: scripts } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install
+      - run: npm run validate
+
+  import:
+    if: github.event_name == 'workflow_dispatch' && inputs.import
+    needs: validate
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: scripts } }
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm install
+      - run: npm run import
