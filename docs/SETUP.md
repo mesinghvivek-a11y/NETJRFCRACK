@@ -23,3 +23,16 @@ Data scripts: see `scripts/` (`cd scripts && npm install && npm run validate`).
 
 ## 4. Deploy (Vercel)
 Import the GitHub repo, set the two `NEXT_PUBLIC_` variables, deploy, then add the Vercel URL to the Supabase redirect URLs.
+
+## 5. Admin portal (added)
+1. Supabase SQL Editor: run `supabase/migrations/0004_admin.sql` once (after 0001, 0002 and 0003).
+2. Make yourself admin (use the email you signed up with):
+   ```sql
+   update profiles set role = 'admin'
+   where id = (select id from auth.users where email = 'YOUR_EMAIL');
+   ```
+3. Reload the site. An **Admin** link appears (sidebar on desktop, top bar on phone and iPad portrait).
+4. Add the new package: the repo's `package.json` now includes `read-excel-file`. Vercel installs it on the next deploy.
+5. Import flow: Admin > Import Excel > choose the workbook > Save to review list > fix rows > Publish.
+6. Images: Admin > Images, pick the paper and upload. Use the file name in the workbook's `image_file` column.
+7. The database is now the source of truth. Do not use `scripts/import.ts` for new questions; use the portal.

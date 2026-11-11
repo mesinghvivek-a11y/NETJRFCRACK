@@ -11,6 +11,10 @@ on:
         description: "Import into Supabase after validating"
         type: boolean
         default: false
+      samples:
+        description: "Also import sample-* files (for testing)"
+        type: boolean
+        default: false
 
 jobs:
   validate:
@@ -36,4 +40,4 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - run: npm install
-      - run: npm run import
+      - run: npm run import -- ${{ inputs.samples && '--include-samples' || '' }}

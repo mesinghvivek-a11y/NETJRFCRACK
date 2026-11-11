@@ -1,4 +1,5 @@
-import { LogOut } from "lucide-react";
+import Link from "next/link";
+import { LogOut, ShieldCheck } from "lucide-react";
 import { SideNav, TabBar } from "@/components/AppNav";
 import { APP_NAME } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/server";
@@ -18,6 +19,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   const who = (user?.user_metadata?.full_name as string | undefined) ?? user?.email ?? "";
+  let isAdmin = false;
+  if (user) {
+    const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    isAdmin = data?.role === "admin";
+  }
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
@@ -25,6 +31,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <p className="px-3 font-serif text-xl font-bold">{APP_NAME}</p>
         <SideNav />
         <div className="mt-auto border-t border-line pt-4">
+          {isAdmin && (
+            <Link href="/admin" className="mb-1 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-primary-ink hover:bg-primary-wash">
+              <ShieldCheck size={17} aria-hidden="true" />
+              Admin
+            </Link>
+          )}
           <p className="truncate px-3 pb-2 text-sm text-muted" title={who}>{who}</p>
           <SignOut label="Sign out" />
         </div>
@@ -33,7 +45,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div className="flex min-h-dvh flex-col pb-[calc(4.25rem+env(safe-area-inset-bottom))] md:pb-0">
         <header className="flex items-center justify-between border-b border-line bg-surface px-4 py-2 md:hidden">
           <p className="font-serif text-lg font-bold">{APP_NAME}</p>
-          <SignOut label="Sign out" />
+          <div className="flex items-center">
+            {isAdmin && (
+              <Link href="/admin" className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-primary-ink">
+                <ShieldCheck size={17} aria-hidden="true" />
+                Admin
+              </Link>
+            )}
+            <SignOut label="Sign out" />
+          </div>
         </header>
         <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 md:px-8 md:py-10">{children}</main>
       </div>

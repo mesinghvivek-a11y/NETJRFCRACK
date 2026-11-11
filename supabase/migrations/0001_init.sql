@@ -272,6 +272,7 @@ end $$;
 
 revoke all on function reveal_answer, start_attempt, save_responses, submit_attempt, attempt_review from public;
 grant execute on function reveal_answer, start_attempt, save_responses, submit_attempt, attempt_review to authenticated;
+revoke execute on function reveal_answer, start_attempt, save_responses, submit_attempt, attempt_review from anon;
 
 -- ───────────── Analytics views ─────────────
 
@@ -294,3 +295,6 @@ select a.user_id, q.subject_id, q.primary_unit_id as unit_id, q.primary_topic_id
   join questions q on q.id = r.question_id
  where a.user_id = auth.uid()
  group by 1, 2, 3, 4;
+
+-- Views are for signed-in users only.
+revoke all on stats_topic_year, my_topic_performance from anon;
