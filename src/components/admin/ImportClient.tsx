@@ -18,11 +18,13 @@ interface Analysed {
 
 interface Props {
   units: TaxUnit[];
-  subjectIds: string[];
+  subjects: { id: string; code: string }[];
   existingPapers: { id: string; total: number }[];
 }
 
-export function ImportClient({ units, subjectIds, existingPapers }: Props) {
+export function ImportClient({ units, subjects, existingPapers }: Props) {
+  const subjectIds = subjects.map((x) => x.id);
+  const codes: Record<string, string> = Object.fromEntries(subjects.map((x) => [x.id, x.code]));
   const router = useRouter();
   const [fileName, setFileName] = useState("");
   const [wb, setWb] = useState<ParsedWorkbook | null>(null);
@@ -41,7 +43,7 @@ export function ImportClient({ units, subjectIds, existingPapers }: Props) {
     setRows([]);
     setFileName(file.name);
     try {
-      const parsed = await parseWorkbook(file);
+      const parsed = await parseWorkbook(file, codes);
       const result = await analyse(parsed);
       setWb(parsed);
       setRows(result.rows);
@@ -57,7 +59,12 @@ export function ImportClient({ units, subjectIds, existingPapers }: Props) {
     const supabase = createClient();
     const paperIssues: string[] = [];
     const totals = new Map<string, number>(existingPapers.map((p) => [p.id, p.total]));
+    const seenPapers = new Set<string>();
     for (const p of parsed.papers) {
+      if (!p.id) paperIssues.push(`A paper row (${p.subject || "no subject"}, ${p.year || "no year"}) is missing subject, year, session or language, so no paper code could be built.`);
+      else if (seenPapers.has(p.id)) paperIssues.push(`Paper ${p.id} appears twice on the Papers sheet.`);
+      seenPapers.add(p.id);
+      if (!["E", "H"].includes(p.language)) paperIssues.push(`Paper ${p.id}: language must be E or H.`);
       if (!subjectIds.includes(p.subject)) paperIssues.push(`Paper ${p.id}: subject "${p.subject}" is not set up yet.`);
       if (!["june", "december"].includes(p.session)) paperIssues.push(`Paper ${p.id}: session must be june or december.`);
       if (!["regular", "reexam"].includes(p.exam_kind)) paperIssues.push(`Paper ${p.id}: exam_kind must be regular or reexam.`);
