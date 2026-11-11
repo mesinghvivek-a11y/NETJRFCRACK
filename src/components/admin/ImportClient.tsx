@@ -64,7 +64,10 @@ export function ImportClient({ units, subjects, existingPapers }: Props) {
       if (!p.id) paperIssues.push(`A paper row (${p.subject || "no subject"}, ${p.year || "no year"}) is missing subject, year, session or language, so no paper code could be built.`);
       else if (seenPapers.has(p.id)) paperIssues.push(`Paper ${p.id} appears twice on the Papers sheet.`);
       seenPapers.add(p.id);
-      if (!["E", "H"].includes(p.lang)) paperIssues.push(`Paper ${p.id}: language must be E or H.`);
+      
+      const lang = String((p as any).language ?? (p as any).lang ?? "").toUpperCase();
+      if (!["E", "H"].includes(lang)) paperIssues.push(`Paper ${p.id}: language must be E or H.`);
+
       if (!subjectIds.includes(p.subject)) paperIssues.push(`Paper ${p.id}: subject "${p.subject}" is not set up yet.`);
       if (!["june", "december"].includes(p.session)) paperIssues.push(`Paper ${p.id}: session must be june or december.`);
       if (!["regular", "reexam"].includes(p.exam_kind)) paperIssues.push(`Paper ${p.id}: exam_kind must be regular or reexam.`);
