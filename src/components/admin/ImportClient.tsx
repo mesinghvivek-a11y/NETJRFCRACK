@@ -43,7 +43,7 @@ export function ImportClient({ units, subjects, existingPapers }: Props) {
     setRows([]);
     setFileName(file.name);
     try {
-      const parsed = await parseWorkbook(file, codes);
+      const parsed = await parseWorkbook(file);
       const result = await analyse(parsed);
       setWb(parsed);
       setRows(result.rows);
