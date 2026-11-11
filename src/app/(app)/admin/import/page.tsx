@@ -19,7 +19,7 @@ export default async function ImportPage() {
       <div className="mt-6">
         <ImportClient
           units={units}
-          subjects={(subjects.data ?? []).map((s: any) => s.id as string)}
+          subjects={(subjects.data ?? []).map((s: any) => ({ id: s.id as string, code: s.code as string }))}
           existingPapers={(papers.data ?? []).map((p: any) => ({ id: p.id as string, total: p.total_questions as number }))}
         />
       </div>
