@@ -3,8 +3,9 @@ import { Noto_Sans, Noto_Serif } from "next/font/google";
 import { APP_NAME } from "@/lib/brand";
 import "./globals.css";
 
-const sans = Noto_Sans({ subsets: ["latin", "devanagari"], variable: "--font-sans", display: "swap" });
-const serif = Noto_Serif({ subsets: ["latin", "devanagari"], variable: "--font-serif", display: "swap" });
+const sans = Noto_Sans({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+const serif = Noto_Serif({ subsets: ["latin"], variable: "--font-serif", display: "swap" });
+
 
 export const metadata: Metadata = {
   title: { default: `${APP_NAME}: UGC NET Geography`, template: `%s | ${APP_NAME}` },
