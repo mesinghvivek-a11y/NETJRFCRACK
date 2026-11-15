@@ -1,13 +1,14 @@
 import { QuestionEditor } from "@/components/admin/QuestionEditor";
-import { loadUnits, requireAdmin } from "@/lib/admin/guard";
+import { loadPaperSubjects, loadUnitsBySubject, requireAdmin } from "@/lib/admin/guard";
 import { KEYS, type AdminQuestion } from "@/lib/admin/model";
 
 export const metadata = { title: "New question" };
 
 export default async function NewQuestionPage() {
   const { supabase } = await requireAdmin();
-  const [units, papers, passages] = await Promise.all([
-    loadUnits(supabase),
+  const [unitsBySubject, paperSubjects, papers, passages] = await Promise.all([
+    loadUnitsBySubject(supabase),
+    loadPaperSubjects(supabase),
     supabase.from("papers").select("id").order("year", { ascending: false }),
     supabase.from("passages").select("id"),
   ]);
@@ -24,14 +25,15 @@ export default async function NewQuestionPage() {
     body: { en: { text: "" } },
     options: KEYS.map((k) => ({ key: k, en: { text: "" } })),
     answer: { correct: [], status: "final" },
-    primary: { unit: units[0]?.id ?? "" },
+    primary: { unit: "" },
     tags: [],
     review_status: "draft",
   };
   return (
     <QuestionEditor
       initial={blank}
-      units={units}
+      unitsBySubject={unitsBySubject}
+      paperSubjects={paperSubjects}
       passageIds={(passages.data ?? []).map((p: any) => p.id as string)}
       paperIds={paperIds}
       mode={{ kind: "live", isNew: true, publishStatus: "draft" }}

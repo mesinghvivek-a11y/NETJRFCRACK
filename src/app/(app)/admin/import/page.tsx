@@ -1,14 +1,14 @@
 import { ImportClient } from "@/components/admin/ImportClient";
-import { loadUnits, requireAdmin } from "@/lib/admin/guard";
+import { loadUnitsBySubject, requireAdmin } from "@/lib/admin/guard";
 
 export const metadata = { title: "Import Excel" };
 
 export default async function ImportPage() {
   const { supabase } = await requireAdmin();
-  const [units, subjects, papers] = await Promise.all([
-    loadUnits(supabase),
-    supabase.from("subjects").select("id"),
-    supabase.from("papers").select("id, total_questions"),
+  const [unitsBySubject, subjects, papers] = await Promise.all([
+    loadUnitsBySubject(supabase),
+    supabase.from("subjects").select("id, nta_code"),
+    supabase.from("papers").select("id, total_questions, subject_id"),
   ]);
   return (
     <section>
@@ -18,9 +18,9 @@ export default async function ImportPage() {
       </p>
       <div className="mt-6">
         <ImportClient
-          units={units}
-          subjects={(subjects.data ?? []).map((s: any) => ({ id: s.id as string, code: s.code as string }))}
-          existingPapers={(papers.data ?? []).map((p: any) => ({ id: p.id as string, total: p.total_questions as number }))}
+          unitsBySubject={unitsBySubject}
+          subjects={(subjects.data ?? []).map((s: any) => ({ id: s.id as string, code: (s.nta_code ?? "") as string }))}
+          existingPapers={(papers.data ?? []).map((p: any) => ({ id: p.id as string, total: p.total_questions as number, subject: p.subject_id as string }))}
         />
       </div>
     </section>

@@ -1,5 +1,7 @@
 export interface Lang {
   text: string;
+  context?: string;
+  statements?: string[];
   table?: { columns: string[]; rows: string[][] };
   image?: string;
 }

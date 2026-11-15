@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
-  FORMATS, KEYS, STATUSES, makeId, parseTable, refLine, stateOf, tableToText, validateQuestion,
+  DIFFICULTIES, FORMATS, KEYS, NATURES, STATUSES, makeId, parseTable, refLine, stateOf, tableToText, validateQuestion,
   type AdminQuestion, type Key, type TaxUnit,
 } from "@/lib/admin/model";
 
@@ -15,7 +15,9 @@ type Mode =
 
 interface Props {
   initial: AdminQuestion;
-  units: TaxUnit[];
+  unitsBySubject: Record<string, TaxUnit[]>;
+  paperSubjects: Record<string, string>;
+  defaultSubject?: string;
   passageIds: string[];
   paperIds?: string[];
   paperTotal?: number;
@@ -52,7 +54,16 @@ function finalize(q: AdminQuestion): AdminQuestion {
   d.answer.source = d.answer.source?.trim() || undefined;
   d.body.en.text = d.body.en.text.trim();
   d.body.en.image = d.body.en.image?.trim() || undefined;
-  if (d.body.hi && !d.body.hi.text.trim()) d.body.hi = undefined;
+  d.body.en.context = d.body.en.context?.trim() || undefined;
+  const st = (d.body.en.statements ?? []).map((x) => x.trim()).filter((x) => x.length > 0);
+  d.body.en.statements = st.length ? st : undefined;
+  if (d.body.hi) {
+    const hs = (d.body.hi.statements ?? []).map((x) => x.trim()).filter((x) => x.length > 0);
+    d.body.hi = { text: d.body.hi.text.trim(), context: d.body.hi.context?.trim() || undefined, statements: hs.length ? hs : undefined };
+    if (!d.body.hi.text && !d.body.hi.context && !d.body.hi.statements) d.body.hi = undefined;
+  }
+  d.difficulty = d.difficulty || undefined;
+  d.nature = d.nature || undefined;
   d.options = d.options.map((o) => ({ ...o, en: { text: o.en.text.trim() }, hi: o.hi?.text.trim() ? { text: o.hi.text.trim() } : undefined }));
   const ex = d.explanation;
   if (ex) {
@@ -69,10 +80,14 @@ function finalize(q: AdminQuestion): AdminQuestion {
   return d;
 }
 
-export function QuestionEditor({ initial, units, passageIds, paperIds, paperTotal, mode }: Props) {
+export function QuestionEditor({ initial, unitsBySubject, paperSubjects, defaultSubject, passageIds, paperIds, paperTotal, mode }: Props) {
   const router = useRouter();
   const [q, setQ] = useState<AdminQuestion>(initial);
+  const subject = paperSubjects[q.paper_id] ?? defaultSubject ?? "";
+  const units = useMemo<TaxUnit[]>(() => unitsBySubject[subject] ?? [], [unitsBySubject, subject]);
   const [tableText, setTableText] = useState<string>(tableToText(initial.body.en.table));
+  const [stmtText, setStmtText] = useState<string>((initial.body.en.statements ?? []).join("\n"));
+  const [hiStmtText, setHiStmtText] = useState<string>((initial.body.hi?.statements ?? []).join("\n"));
   const [refsText, setRefsText] = useState<string>((initial.explanation?.references ?? []).map(refLine).join("\n"));
   const [hiOpen, setHiOpen] = useState<boolean>(Boolean(initial.body.hi?.text) || initial.options.some((o) => o.hi?.text));
   const [extraUnit, setExtraUnit] = useState("");
@@ -201,8 +216,19 @@ export function QuestionEditor({ initial, units, passageIds, paperIds, paperTota
             </select>
           </Field>
         </div>
+        <Field label="Paragraph above the question (optional)" hint="Use when the question has a short passage, case or data description before it.">
+          <textarea rows={3} className={`${inputCls} font-serif`} value={q.body.en.context ?? ""} onChange={(e) => edit((d) => { d.body.en.context = e.target.value; })} />
+        </Field>
         <Field label="Question (English)">
           <textarea rows={5} className={`${inputCls} font-serif`} value={q.body.en.text} onChange={(e) => edit((d) => { d.body.en.text = e.target.value; })} />
+        </Field>
+        <Field label="Statements (optional)" hint="One per line, for example: Statement I: ... then Statement II: ... Used for statement-based and assertion-reason questions.">
+          <textarea
+            rows={4}
+            className={`${inputCls} font-serif`}
+            value={stmtText}
+            onChange={(e) => { setStmtText(e.target.value); edit((d) => { d.body.en.statements = e.target.value.split("\n"); }); }}
+          />
         </Field>
         <Field label="Table (optional)" hint="Header row first. Separate cells with | and put each row on a new line.">
           <textarea
@@ -282,6 +308,11 @@ export function QuestionEditor({ initial, units, passageIds, paperIds, paperTota
       </Card>
 
       <Card title="Syllabus mapping">
+        {units.length === 0 && (
+          <p className="rounded-lg bg-ochre/15 px-3 py-2 text-sm">
+            No syllabus is set up for this subject yet. <Link href="/admin/syllabus" className="font-medium text-primary-ink underline underline-offset-4">Add it under Admin &gt; Syllabus</Link>.
+          </p>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Main unit">
             <select className={inputCls} value={q.primary.unit} onChange={(e) => edit((d) => { d.primary = { unit: e.target.value }; })}>
@@ -323,6 +354,20 @@ export function QuestionEditor({ initial, units, passageIds, paperIds, paperTota
 
       <Card title="Review">
         <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Difficulty (optional)">
+            <select className={inputCls} value={q.difficulty ?? ""} onChange={(e) => edit((d) => { d.difficulty = e.target.value || undefined; })}>
+              <option value="">Not set</option>
+              {DIFFICULTIES.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </Field>
+          <Field label="Nature of question (optional)">
+            <select className={inputCls} value={q.nature ?? ""} onChange={(e) => edit((d) => { d.nature = e.target.value || undefined; })}>
+              <option value="">Not set</option>
+              {NATURES.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Review status">
             <select className={inputCls} value={q.review_status} onChange={(e) => edit((d) => { d.review_status = e.target.value; })}>
               <option value="draft">draft</option>
@@ -341,8 +386,19 @@ export function QuestionEditor({ initial, units, passageIds, paperIds, paperTota
         </button>
         {hiOpen && (
           <div className="mt-3 space-y-3">
+            <Field label="Paragraph (Hindi)">
+              <textarea rows={3} className={inputCls} value={q.body.hi?.context ?? ""} onChange={(e) => edit((d) => { d.body.hi = { ...(d.body.hi ?? { text: "" }), context: e.target.value }; })} />
+            </Field>
             <Field label="Question (Hindi)">
-              <textarea rows={4} className={inputCls} value={q.body.hi?.text ?? ""} onChange={(e) => edit((d) => { d.body.hi = { text: e.target.value }; })} />
+              <textarea rows={4} className={inputCls} value={q.body.hi?.text ?? ""} onChange={(e) => edit((d) => { d.body.hi = { ...(d.body.hi ?? { text: "" }), text: e.target.value }; })} />
+            </Field>
+            <Field label="Statements (Hindi, one per line)">
+              <textarea
+                rows={3}
+                className={inputCls}
+                value={hiStmtText}
+                onChange={(e) => { setHiStmtText(e.target.value); edit((d) => { d.body.hi = { ...(d.body.hi ?? { text: "" }), statements: e.target.value.split("\n") }; }); }}
+              />
             </Field>
             {q.options.map((o, i) => (
               <Field key={o.key} label={`Option ${o.key} (Hindi)`}>

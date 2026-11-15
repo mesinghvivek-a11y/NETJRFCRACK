@@ -18,7 +18,15 @@ const STATUS_NOTE: Record<string, string> = {
 function Content({ c }: { c: Lang }) {
   return (
     <>
+      {c.context && <span className="mb-3 block whitespace-pre-line border-l-2 border-line pl-3">{c.context}</span>}
       <span className="block whitespace-pre-line">{c.text}</span>
+      {c.statements && c.statements.length > 0 && (
+        <span className="mt-3 block space-y-2">
+          {c.statements.map((st, i) => (
+            <span key={i} className="block whitespace-pre-line">{st}</span>
+          ))}
+        </span>
+      )}
       {c.table && (
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full border-collapse text-sm">
@@ -236,6 +244,7 @@ export function QuestionCard({ item, primaryLabel, tagLabels }: { item: BrowseIt
         {tagLabels.map((t, i) => (
           <span key={i} className="rounded-full border border-line px-2.5 py-1 text-xs text-muted">{t}</span>
         ))}
+        <span className="ml-auto self-center font-mono text-xs text-muted">{item.id}</span>
       </footer>
 
       {reporting && (

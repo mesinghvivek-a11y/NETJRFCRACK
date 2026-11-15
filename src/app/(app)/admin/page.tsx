@@ -4,10 +4,11 @@ import { paperLabel } from "@/lib/admin/model";
 
 export default async function AdminHome() {
   const { supabase } = await requireAdmin();
-  const [progress, batches, reports] = await Promise.all([
+  const [progress, batches, reports, unitCount] = await Promise.all([
     supabase.from("admin_paper_progress").select("*").order("year", { ascending: false }),
     supabase.from("import_batches").select("id, filename, created_at, status, summary").order("created_at", { ascending: false }).limit(8),
     supabase.from("error_reports").select("id", { count: "exact", head: true }).eq("status", "open"),
+    supabase.from("units").select("id", { count: "exact", head: true }),
   ]);
   const papers: any[] = progress.data ?? [];
   const sum = (k: string): number => papers.reduce((n: number, p: any) => n + (p[k] ?? 0), 0);
@@ -26,6 +27,12 @@ export default async function AdminHome() {
         <p role="alert" className="mb-4 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
           {progress.error.message}. Run supabase/migrations/0004_admin.sql if you haven't.
         </p>
+      )}
+      {(unitCount.count ?? 0) === 0 && (
+        <div className="mb-4 rounded-xl border border-ochre/50 bg-ochre/15 p-4">
+          <p className="font-semibold">No syllabus is loaded yet</p>
+          <p className="mt-1 text-sm">Questions can't be matched to units and topics until it is. <Link href="/admin/syllabus" className="font-medium text-primary-ink underline underline-offset-4">Set it up under Syllabus</Link> (one tap for Geography).</p>
+        </div>
       )}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {cards.map((c) => (

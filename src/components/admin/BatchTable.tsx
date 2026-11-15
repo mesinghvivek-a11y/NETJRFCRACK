@@ -17,7 +17,7 @@ const badge: Record<string, string> = {
   error: "bg-danger/10 text-danger",
 };
 
-export function BatchTable({ batchId, status, summary, units, rows }: { batchId: string; status: string; summary: any; units: TaxUnit[]; rows: Row[] }) {
+export function BatchTable({ batchId, status, summary, unitsBySubject, paperSubjects, rows }: { batchId: string; status: string; summary: any; unitsBySubject: Record<string, TaxUnit[]>; paperSubjects: Record<string, string>; rows: Row[] }) {
   const router = useRouter();
   const [filter, setFilter] = useState<"all" | "new" | "changed" | "error">("all");
   const [search, setSearch] = useState("");
@@ -28,6 +28,9 @@ export function BatchTable({ batchId, status, summary, units, rows }: { batchId:
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const editable = status === "staged";
+  const firstSel = rows.find((r) => sel.has(r.id));
+  const bulkSubject = firstSel ? paperSubjects[firstSel.paper_id] ?? "" : Object.values(paperSubjects)[0] ?? "";
+  const units: TaxUnit[] = unitsBySubject[bulkSubject] ?? [];
   const shown = useMemo(
     () => rows.filter((r) => (filter === "all" || r.state === filter) && (!search || (r.text ?? "").toLowerCase().includes(search.toLowerCase()) || r.question_id.toLowerCase().includes(search.toLowerCase()))),
     [rows, filter, search],
@@ -51,10 +54,12 @@ export function BatchTable({ batchId, status, summary, units, rows }: { batchId:
     try {
       const supabase = createClient();
       const ids = Array.from(sel);
-      const { data, error } = await supabase.from("staged_questions").select("id, is_update, data").in("id", ids);
+      const { data, error } = await supabase.from("staged_questions").select("id, paper_id, is_update, data").in("id", ids);
       if (error) throw new Error(error.message);
-      const ctx = { units };
+      let skipped = 0;
       for (const row of data ?? []) {
+        if ((paperSubjects[row.paper_id as string] ?? "") !== bulkSubject) { skipped++; continue; }
+        const ctx = { units };
         const d: AdminQuestion = structuredClone(row.data as AdminQuestion);
         if (kind === "topic") d.primary = { unit: bulkUnit, topic: bulkTopic || undefined };
         else d.review_status = "verified";
@@ -63,7 +68,7 @@ export function BatchTable({ batchId, status, summary, units, rows }: { batchId:
         if (e) throw new Error(e.message);
       }
       setSel(new Set());
-      setMsg({ ok: true, text: `Updated ${ids.length} question(s).` });
+      setMsg({ ok: true, text: `Updated ${ids.length - skipped} question(s).${skipped ? ` ${skipped} skipped because they belong to another subject.` : ""}` });
       router.refresh();
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : "Update failed." });

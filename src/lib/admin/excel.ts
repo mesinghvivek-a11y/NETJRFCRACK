@@ -1,11 +1,12 @@
-import { KEYS, makeId, parseCode, parseTable, type AdminQuestion, type Key, type Tag } from "./model";
+import { KEYS, makeId, paperCode, parseCode, parseTable, type AdminQuestion, type Key, type Tag } from "./model";
 
 export interface ParsedPaper {
-  id: string; subject: string; year: number; session: string; exam_kind: string;
-  shift: number; exam_date?: string; total_questions: number;
+  id: string; subject: string; year: number; session: string; language: string; exam_kind: string; shift: number;
+  exam_date?: string; total_questions: number; duration_minutes?: number; max_marks?: number;
+  answer_key_source?: string; answer_key_status?: string; source_name?: string; notes?: string;
 }
 export interface ParsedPassage { id: string; paper_id: string; body: { en: { text: string }; hi?: { text: string } } }
-export interface ParsedRow { rowNo: number; q: AdminQuestion; parseIssues: string[] }
+export interface ParsedRow { rowNo: number; q: AdminQuestion; parseIssues: string[]; primaryRaw: string; tagsRaw: string[] }
 export interface ParsedWorkbook { papers: ParsedPaper[]; passages: ParsedPassage[]; rows: ParsedRow[]; fileIssues: string[] }
 
 type Cell = string | number | boolean | Date | null | undefined;
@@ -32,9 +33,8 @@ function toObjects(rows: Cell[][]): { rowNo: number; get: (col: string) => strin
   const out: { rowNo: number; get: (col: string) => string }[] = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const idx = (col: string): number => head.indexOf(col);
     const get = (col: string): string => {
-      const j = idx(col);
+      const j = head.indexOf(col);
       return j < 0 ? "" : s(r[j]);
     };
     out.push({ rowNo: i + 1, get });
@@ -43,8 +43,11 @@ function toObjects(rows: Cell[][]): { rowNo: number; get: (col: string) => strin
 }
 
 const isExample = (note: string): boolean => /^example/i.test(note);
+const lines = (text: string): string[] => text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+const optNum = (v: string): number | undefined => (v && !Number.isNaN(Number(v)) ? Number(v) : undefined);
 
-export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
+/** subjectCodes maps a subject id (geography) to its NTA code (80). */
+export async function parseWorkbook(file: File, subjectCodes: Record<string, string>): Promise<ParsedWorkbook> {
   const fileIssues: string[] = [];
   const papersRaw = await readSheet(file, "Papers");
   const qRaw = await readSheet(file, "Questions");
@@ -54,17 +57,25 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
 
   const papers: ParsedPaper[] = [];
   for (const r of toObjects(papersRaw ?? [])) {
-    const id = r.get("paper_id");
-    if (!id || isExample(r.get("source_note"))) continue;
+    const subject = r.get("subject").toLowerCase();
+    if (!subject && !r.get("year")) continue;
+    if (isExample(r.get("notes"))) continue;
+    const year = Number(r.get("year"));
+    const session = r.get("session").toLowerCase();
+    const language = (r.get("language") || "E").toUpperCase();
+    const exam_kind = r.get("exam_kind").toLowerCase() || "regular";
+    const shift = Number(r.get("shift")) || 1;
     papers.push({
-      id,
-      subject: r.get("subject"),
-      year: Number(r.get("year")),
-      session: r.get("session").toLowerCase(),
-      exam_kind: r.get("exam_kind").toLowerCase() || "regular",
-      shift: Number(r.get("shift")) || 1,
+      id: paperCode({ subjectCode: subjectCodes[subject] ?? "", year, session, language, shift, examKind: exam_kind }),
+      subject, year, session, language, exam_kind, shift,
       exam_date: r.get("exam_date") || undefined,
       total_questions: Number(r.get("total_questions")),
+      duration_minutes: optNum(r.get("duration_minutes")),
+      max_marks: optNum(r.get("max_marks")),
+      answer_key_source: r.get("answer_key_source") || undefined,
+      answer_key_status: r.get("answer_key_status").toLowerCase() || undefined,
+      source_name: r.get("source_name") || undefined,
+      notes: r.get("notes") || undefined,
     });
   }
 
@@ -74,12 +85,12 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
     const text = r.get("text_en");
     if (!id || isExample(text)) continue;
     const hi = r.get("text_hi");
-    passages.push({ id, paper_id: r.get("paper_id"), body: { en: { text }, ...(hi ? { hi: { text: hi } } : {}) } });
+    passages.push({ id, paper_id: r.get("paper_id").toUpperCase(), body: { en: { text }, ...(hi ? { hi: { text: hi } } : {}) } });
   }
 
   const rows: ParsedRow[] = [];
   for (const r of toObjects(qRaw ?? [])) {
-    const paperId = r.get("paper_id");
+    const paperId = r.get("paper_id").toUpperCase();
     const qNoText = r.get("q_no");
     if (!paperId && !qNoText && !r.get("question_en")) continue;
     if (isExample(r.get("notes"))) continue;
@@ -90,23 +101,25 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
       (x): x is Key => (KEYS as string[]).includes(x),
     );
 
-    const primaryCode = r.get("primary_topic");
-    const primary: Tag = parseCode(primaryCode) ?? { unit: primaryCode };
-    if (primaryCode && !parseCode(primaryCode)) issues.push(`primary_topic "${primaryCode}" is not a valid code.`);
-
+    // Topic cells are resolved against the syllabus in the database later (codes, names or "Unit 4").
+    const primaryRaw = r.get("primary_topic");
+    const tagsRaw = r.get("extra_tags").split(/[;\n]+/).map((x) => x.trim()).filter((x) => x.length > 0);
+    const primary: Tag = parseCode(primaryRaw) ?? { unit: "" };
     const tags: Tag[] = [];
-    for (const part of r.get("extra_tags").split(/[;\n]+/)) {
-      const t = part.trim();
-      if (!t) continue;
+    for (const t of tagsRaw) {
       const parsed = parseCode(t);
-      if (!parsed) { issues.push(`extra tag "${t}" is not a valid code.`); continue; }
-      tags.push(parsed);
+      if (parsed) tags.push(parsed);
     }
 
-    const en = r.get("question_en");
     const table = parseTable(r.get("table"));
     const image = r.get("image_file");
+    const context = r.get("paragraph");
+    const statements = lines(r.get("statements"));
+
     const hiText = r.get("question_hi");
+    const hiContext = r.get("paragraph_hi");
+    const hiStatements = lines(r.get("statements_hi"));
+    const hasHi = Boolean(hiText || hiContext || hiStatements.length);
 
     const options = KEYS.map((k) => {
       const lower = k.toLowerCase();
@@ -127,13 +140,21 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
       id: paperId && Number.isInteger(qNo) ? makeId(paperId, qNo) : "",
       paper_id: paperId,
       q_no: qNo,
-      format: r.get("format") || "mcq",
-      canonical_id: r.get("canonical_of") || undefined,
+      format: r.get("format").toLowerCase() || "mcq",
+      canonical_id: r.get("canonical_of").toUpperCase() || undefined,
       passage_id: r.get("passage_id") || undefined,
       source_ref: r.get("source_ref") || undefined,
+      difficulty: r.get("difficulty").toLowerCase() || undefined,
+      nature: r.get("nature").toLowerCase() || undefined,
       body: {
-        en: { text: en, ...(table ? { table } : {}), ...(image && paperId ? { image: `${paperId}/${image}` } : {}) },
-        ...(hiText ? { hi: { text: hiText } } : {}),
+        en: {
+          text: r.get("question_en"),
+          ...(context ? { context } : {}),
+          ...(statements.length ? { statements } : {}),
+          ...(table ? { table } : {}),
+          ...(image && paperId ? { image: `${paperId}/${image}` } : {}),
+        },
+        ...(hasHi ? { hi: { text: hiText, ...(hiContext ? { context: hiContext } : {}), ...(hiStatements.length ? { statements: hiStatements } : {}) } } : {}),
       },
       options,
       answer: { correct, status: r.get("answer_status").toLowerCase(), source: r.get("key_source") || undefined },
@@ -142,7 +163,7 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
       explanation: hasExp ? { summary: summary || undefined, options: Object.keys(expOpts).length ? expOpts : undefined, references: refs, status: "draft" } : undefined,
       review_status: r.get("review_status").toLowerCase() || "draft",
     };
-    rows.push({ rowNo: r.rowNo, q, parseIssues: issues });
+    rows.push({ rowNo: r.rowNo, q, parseIssues: issues, primaryRaw, tagsRaw });
   }
   return { papers, passages, rows, fileIssues };
 }

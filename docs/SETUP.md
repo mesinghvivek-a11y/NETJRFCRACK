@@ -36,3 +36,20 @@ Import the GitHub repo, set the two `NEXT_PUBLIC_` variables, deploy, then add t
 5. Import flow: Admin > Import Excel > choose the workbook > Save to review list > fix rows > Publish.
 6. Images: Admin > Images, pick the paper and upload. Use the file name in the workbook's `image_file` column.
 7. The database is now the source of truth. Do not use `scripts/import.ts` for new questions; use the portal.
+
+## 6. New workbook format (version 2)
+1. Supabase SQL Editor: run `supabase/migrations/0005_format.sql` once (after 0004).
+2. Use `docs/UGC_NET_question_workbook_v2.xlsx`. Ids are built like 80-2025-JUN-E-045 (subject code, year, session, language, question number).
+3. The older template and older ids (GEO-2025-JUN-S1-Q045) are no longer used.
+
+## 7. Syllabus manager (added)
+1. Supabase SQL Editor: run `supabase/migrations/0006_syllabus.sql` once (after 0005). It also loads the Geography syllabus (10 units, 160 topics), so uploads work straight away.
+2. Admin > Syllabus lets you add a subject (name, NTA code, id prefix), load a ready-made syllabus (Geography or Paper 1) in one tap, edit units and topics, paste or upload a whole syllabus, and download the code list.
+3. In the workbook, the primary_topic and extra_tags cells accept a code (geo-u04-t01), a topic name (Tides), a unit name, or Unit 4. Unknown names get a "Did you mean" hint.
+4. Adding a new subject: add a row on the workbook's Lists sheet (subject id and NTA code) and use that id in the Papers sheet.
+
+## 8. Tests, analysis and trends (added)
+1. Supabase SQL Editor: run `supabase/migrations/0007_tests.sql` once (after 0006).
+2. Tests: Tests page > choose years, units or topics > Start test. The exam screen is at /exam/<id> (no site menu, like NTA).
+3. Each question is 72 seconds and 2 marks. The server owns the clock, answers save every 15 seconds and on this device, and the test submits itself when time runs out.
+4. My analysis: score history and weak/strong topics (after 5 attempts in a topic). Trends: counts per unit and topic per year, built from published questions.
