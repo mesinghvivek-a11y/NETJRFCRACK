@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Upload } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { parseWorkbook, type ParsedWorkbook } from "@/lib/admin/excel";
-import { diffFields, resolveTag, rowToQuestion, stateOf, validateQuestion, type AdminQuestion, type Issue, type Tag, type TaxUnit } from "@/lib/admin/model";
+import { parseWorkbook, type ParsedPaper, type ParsedWorkbook } from "@/lib/admin/excel";
+import { examLabel } from "@/lib/papers";
+import { planPapers, type PaperTarget } from "@/lib/admin/papers-plan";
+import { diffFields, makeId, resolveTag, rowToQuestion, stateOf, validateQuestion, type AdminQuestion, type Issue, type Tag, type TaxUnit } from "@/lib/admin/model";
 
 interface Analysed {
   rowNo: number;
@@ -20,12 +22,10 @@ interface Analysed {
 interface Props {
   unitsBySubject: Record<string, TaxUnit[]>;
   subjects: { id: string; code: string }[];
-  existingPapers: { id: string; total: number; subject: string }[];
+  existingPapers: { id: string; total: number; subject: string; year: number; session: string; shift: number; kind: string; language: string }[];
 }
 
 export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props) {
-  const subjectIds = subjects.map((x) => x.id);
-  const codes: Record<string, string> = Object.fromEntries(subjects.map((x) => [x.id, x.code]));
   const router = useRouter();
   const [fileName, setFileName] = useState("");
   const [wb, setWb] = useState<ParsedWorkbook | null>(null);
@@ -44,7 +44,7 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
     setRows([]);
     setFileName(file.name);
     try {
-      const parsed = await parseWorkbook(file, codes);
+      const parsed = await parseWorkbook(file);
       const result = await analyse(parsed);
       setWb(parsed);
       setRows(result.rows);
@@ -59,47 +59,56 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
   async function analyse(parsed: ParsedWorkbook): Promise<{ rows: Analysed[]; paperIssues: string[] }> {
     const supabase = createClient();
     const paperIssues: string[] = [];
-    const totals = new Map<string, number>(existingPapers.map((p) => [p.id, p.total]));
-    const subjectOf = new Map<string, string>(existingPapers.map((p) => [p.id, p.subject]));
-    const seenPapers = new Set<string>();
-    for (const p of parsed.papers) {
-      if (!p.id) paperIssues.push(`A paper row (${p.subject || "no subject"}, ${p.year || "no year"}) is missing subject, year, session or language, so no paper code could be built.`);
-      else if (seenPapers.has(p.id)) paperIssues.push(`Paper ${p.id} appears twice on the Papers sheet.`);
-      seenPapers.add(p.id);
-      if (!["E", "H"].includes(p.language)) paperIssues.push(`Paper ${p.id}: language must be E or H.`);
-      if (!subjectIds.includes(p.subject)) paperIssues.push(`Paper ${p.id}: subject "${p.subject}" is not set up yet.`);
-      if (!["june", "december"].includes(p.session)) paperIssues.push(`Paper ${p.id}: session must be june or december.`);
-      if (!["regular", "reexam"].includes(p.exam_kind)) paperIssues.push(`Paper ${p.id}: exam_kind must be regular or reexam.`);
-      if (!Number.isInteger(p.year) || p.year < 2014) paperIssues.push(`Paper ${p.id}: year is not valid.`);
-      if (![50, 75, 100].includes(p.total_questions)) paperIssues.push(`Paper ${p.id}: total_questions must be 50, 75 or 100.`);
-      totals.set(p.id, p.total_questions);
-      subjectOf.set(p.id, p.subject);
-      if (subjectIds.includes(p.subject) && (unitsBySubject[p.subject] ?? []).length === 0) {
-        paperIssues.push(`SYLLABUS:${p.subject}`);
-      }
+    const keyOf = (subject: string, year: number, session: string, language: string, shift: number, kind: string): string => `${subject}|${year}|${session}|${language}|${shift}|${kind}`;
+    const cycleOf = (subject: string, year: number, session: string, language: string): string => `${subject}|${year}|${session}|${language}`;
+
+    // 1. Final code of every paper (database and sheet together), and a way to trace any typed code to its paper.
+    const plan = planPapers(subjects, existingPapers, parsed.papers);
+    paperIssues.push(...plan.issues);
+    for (const sid of plan.subjectsOnSheet) if ((unitsBySubject[sid] ?? []).length === 0) paperIssues.push(`SYLLABUS:${sid}`);
+    const resolve = plan.resolve;
+    const sheetByKey = new Map<string, ParsedPaper>(plan.papers.map((p) => [p.id, p]));
+
+    for (const ps of parsed.passages) {
+      const t = resolve(ps.paper_id);
+      if (t) ps.paper_id = t.code;
     }
 
-    const paperIds = Array.from(new Set(parsed.rows.map((r) => r.q.paper_id).filter((x) => x.length > 0)));
+    // 4. Questions already saved for the papers this file touches (to tell new from changed).
     const live = new Map<string, AdminQuestion>();
-    const passageIds = new Set<string>(parsed.passages.map((p) => p.id));
-    for (const pid of paperIds) {
+    const passageIds = new Set<string>(parsed.passages.map((x) => x.id));
+    const targets = new Map<string, PaperTarget | null>();
+    for (const r of parsed.rows) if (!targets.has(r.q.paper_id)) targets.set(r.q.paper_id, resolve(r.q.paper_id));
+    const existingIds = Array.from(new Set(Array.from(targets.values()).map((t) => t?.existingId).filter((x): x is string => Boolean(x))));
+    for (const pid of existingIds) {
       const { data } = await supabase.from("questions").select("*, question_tags(*), question_keys(*)").eq("paper_id", pid);
-      for (const row of data ?? []) live.set(row.id as string, rowToQuestion(row));
+      for (const row of data ?? []) live.set(`${pid}|${row.q_no as number}`, rowToQuestion(row));
       const ps = await supabase.from("passages").select("id").eq("paper_id", pid);
-      for (const p of ps.data ?? []) passageIds.add(p.id as string);
+      for (const x of ps.data ?? []) passageIds.add(x.id as string);
     }
 
+    // 5. Check every row.
     const seenIds = new Map<string, number>();
     const out: Analysed[] = [];
     for (const r of parsed.rows) {
       const q = r.q;
+      const typed = q.paper_id;
+      const target = targets.get(typed) ?? null;
       const issues: Issue[] = r.parseIssues.map((m) => ({ level: "error" as const, msg: m }));
-      const subject = subjectOf.get(q.paper_id) ?? "";
+      let subject = "";
+      let total: number | undefined;
+      if (!target || !target.code) {
+        issues.push({ level: "error", msg: `Paper "${typed}" is not on the Papers sheet or in the database. Its year, session, shift and exam kind must match a row on the Papers sheet.` });
+      } else {
+        q.paper_id = target.code;
+        q.id = Number.isInteger(q.q_no) ? makeId(target.code, q.q_no) : "";
+        subject = target.subject;
+        total = target.total;
+      }
       const units = unitsBySubject[subject] ?? [];
-      if (!totals.has(q.paper_id)) issues.push({ level: "error", msg: `Paper "${q.paper_id}" is not on the Papers sheet or in the database.` });
       if (subject && units.length === 0) {
         issues.push({ level: "error", msg: `The ${subject} syllabus is not set up yet. Add it under Admin > Syllabus.` });
-      } else {
+      } else if (subject) {
         const p1 = resolveTag(r.primaryRaw, units);
         if (p1.tag) q.primary = p1.tag;
         else if (r.primaryRaw) issues.push({ level: "error", msg: p1.error ?? "Main topic not recognised." });
@@ -110,7 +119,7 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
           else issues.push({ level: "error", msg: t.error ?? `Extra tag "${raw}" not recognised.` });
         }
         q.tags = extra.filter((t) => !(t.unit === q.primary.unit && t.topic === q.primary.topic));
-        issues.push(...validateQuestion(q, { units, passageIds, paperTotal: totals.get(q.paper_id) }));
+        issues.push(...validateQuestion(q, { units, passageIds, paperTotal: total }));
       }
       if (q.id && seenIds.has(q.id)) {
         issues.push({ level: "error", msg: `Duplicate of row ${seenIds.get(q.id)} in this file.` });
@@ -119,7 +128,7 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
       }
       if (q.id) seenIds.set(q.id, r.rowNo);
 
-      const existing = live.get(q.id);
+      const existing = target?.existingId ? live.get(`${target.existingId}|${q.q_no}`) : undefined;
       const changed = existing ? diffFields(q, existing) : [];
       let state: Analysed["state"];
       if (issues.some((i) => i.level === "error")) state = "error";
@@ -127,6 +136,10 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
       else state = stateOf(issues, Boolean(existing));
       out.push({ rowNo: r.rowNo, q, issues, isUpdate: Boolean(existing), changed, state });
     }
+
+    // 6. A plain summary of the papers, so a wrong shift or re-exam is spotted before saving.
+    const lines = Array.from(sheetByKey.values()).filter((p) => p.id).map((p) => `${p.id}  =  ${examLabel(p.id)}${p.exam_kind === "reexam" ? " (re-exam)" : ""}`);
+    if (lines.length) paperIssues.unshift(`INFO:${lines.join("\n")}`);
     return { rows: out, paperIssues };
   }
 
@@ -144,8 +157,9 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
       if (e1 || !batch) throw new Error(e1?.message ?? "Could not create the batch.");
       const id = batch.id as string;
 
-      if (wb.papers.length) {
-        const { error: e } = await supabase.from("staged_papers").insert(wb.papers.map((p) => ({ batch_id: id, paper_id: p.id, data: p })));
+      const goodPapers = wb.papers.filter((p) => p.id);
+      if (goodPapers.length) {
+        const { error: e } = await supabase.from("staged_papers").insert(goodPapers.map((p) => ({ batch_id: id, paper_id: p.id, data: p })));
         if (e) throw new Error(e.message);
       }
       if (wb.passages.length) {
@@ -185,13 +199,31 @@ export function ImportClient({ unitsBySubject, subjects, existingPapers }: Props
           <p className="mt-1">Topics in your sheet can't be matched until it is. <Link href="/admin/syllabus" className="font-medium text-primary-ink underline underline-offset-4">Open Admin &gt; Syllabus</Link>, add it once, then upload again.</p>
         </div>
       )}
-      {paperIssues.filter((m) => !m.startsWith("SYLLABUS:")).length > 0 && (
+      {paperIssues.filter((m) => m.startsWith("INFO:")).map((m, i) => (
+        <div key={i} className="mt-4 rounded-lg border border-line bg-surface p-3 text-sm">
+          <p className="font-semibold">Papers in this file</p>
+          <ul className="mt-1 space-y-0.5 text-muted">
+            {m.slice(5).split("\n").map((l, k) => <li key={k}>{l}</li>)}
+          </ul>
+        </div>
+      ))}
+      {paperIssues.filter((m) => !m.startsWith("SYLLABUS:") && !m.startsWith("INFO:")).length > 0 && (
         <ul className="mt-4 space-y-1 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
-          {paperIssues.filter((m) => !m.startsWith("SYLLABUS:")).map((m, i) => <li key={i}>{m}</li>)}
+          {paperIssues.filter((m) => !m.startsWith("SYLLABUS:") && !m.startsWith("INFO:")).map((m, i) => <li key={i}>{m}</li>)}
         </ul>
       )}
 
       {wb && (
+        <details className="mt-4 rounded-lg border border-line bg-surface p-3 text-sm">
+          <summary className="cursor-pointer font-medium">How your file was read</summary>
+          <p className="mt-2">Sheets found: {wb.info.sheets.length ? wb.info.sheets.join(", ") : "none listed"}</p>
+          {Object.entries(wb.info.used).map(([role, name]) => (
+            <p key={role} className="mt-1">{role} sheet: <b>{name}</b>{wb.info.unknownHeaders[role]?.length ? `. Columns not recognised (ignored): ${wb.info.unknownHeaders[role].join(", ")}` : ""}</p>
+          ))}
+        </details>
+      )}
+
+      {wb && (wb.rows.length > 0 || wb.papers.length > 0) && (
         <div className="mt-6">
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {[

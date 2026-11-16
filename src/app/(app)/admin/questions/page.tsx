@@ -1,50 +1,68 @@
 import Link from "next/link";
-import { requireAdmin } from "@/lib/admin/guard";
-import { paperLabel } from "@/lib/admin/model";
+import { AdminQBar } from "@/components/admin/AdminQBar";
+import { QuestionsList, type QRow } from "@/components/admin/QuestionsList";
+import { loadUnitsBySubject, requireAdmin } from "@/lib/admin/guard";
+import { compareNewestFirst, examLabel } from "@/lib/papers";
 
 export const metadata = { title: "Questions" };
 
-const PAGE = 25;
+const PAGE = 30;
 type SP = { [key: string]: string | string[] | undefined };
 const one = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] ?? "" : v ?? "");
 
 export default async function QuestionsPage({ searchParams }: { searchParams: SP }) {
   const { supabase } = await requireAdmin();
+  const [subjectsRes, unitsBySubject, papersRes] = await Promise.all([
+    supabase.from("subjects").select("id, name").order("name"),
+    loadUnitsBySubject(supabase),
+    supabase.from("papers").select("id, subject_id"),
+  ]);
+  const subjects: { id: string; name: string }[] = (subjectsRes.data ?? []).map((s: any) => ({ id: s.id as string, name: s.name as string }));
+  const wanted = one(searchParams.subject);
+  const subject = subjects.some((s) => s.id === wanted) ? wanted : subjects.find((s) => s.id === "geography")?.id ?? subjects[0]?.id ?? "geography";
+  const units = unitsBySubject[subject] ?? [];
+  const papers = (papersRes.data ?? [])
+    .filter((p: any) => p.subject_id === subject)
+    .map((p: any) => ({ id: p.id as string }))
+    .sort(compareNewestFirst)
+    .map((p: { id: string }) => ({ id: p.id, label: `${examLabel(p.id)} (${p.id})` }));
+
   const paper = one(searchParams.paper);
+  const unit = one(searchParams.unit);
+  const topic = one(searchParams.topic);
   const status = one(searchParams.status);
   const review = one(searchParams.review);
-  const text = one(searchParams.q).trim();
+  const missing = one(searchParams.missing) === "1";
+  const text = one(searchParams.q).replace(/[,()%*\\]/g, " ").trim().slice(0, 80);
+  const sort = one(searchParams.sort) || "newest";
   const page = Math.max(1, parseInt(one(searchParams.page) || "1", 10) || 1);
 
   let query = supabase
-    .from("questions")
-    .select("id, paper_id, q_no, publish_status, review_status, primary_topic_id, primary_unit_id, text:body->en->>text, question_keys(answer_status, explanation_status)", { count: "exact" })
-    .order("paper_id", { ascending: false })
-    .order("q_no")
-    .range((page - 1) * PAGE, page * PAGE - 1);
+    .from("admin_questions")
+    .select("id, paper_id, q_no, publish_status, review_status, primary_unit_id, primary_topic_id, text, answer_status, explanation_status", { count: "exact" })
+    .eq("subject_id", subject);
   if (paper) query = query.eq("paper_id", paper);
+  if (unit) query = query.eq("primary_unit_id", unit);
+  if (topic) query = query.eq("primary_topic_id", topic);
   if (status) query = query.eq("publish_status", status);
   if (review) query = query.eq("review_status", review);
-  if (text) query = query.ilike("body->en->>text", `%${text.replace(/[%_]/g, "")}%`);
-
-  const [{ data, count, error }, papers] = await Promise.all([
-    query,
-    supabase.from("papers").select("id, year, session, exam_kind, shift").order("year", { ascending: false }),
-  ]);
-  const rows: any[] = data ?? [];
+  if (missing) query = query.eq("explanation_status", "none");
+  if (text) query = query.or(`text.ilike.%${text}%,id.ilike.%${text}%`);
+  if (sort === "oldest") query = query.order("year", { ascending: true }).order("session", { ascending: false }).order("shift").order("q_no");
+  else if (sort === "edited") query = query.order("updated_at", { ascending: false });
+  else if (sort === "topic") query = query.order("primary_unit_id").order("primary_topic_id").order("q_no");
+  else query = query.order("year", { ascending: false }).order("session", { ascending: true }).order("shift").order("q_no");
+  const { data, count, error } = await query.range((page - 1) * PAGE, page * PAGE - 1);
+  const rows: QRow[] = (data ?? []) as any[];
   const pages = Math.max(1, Math.ceil((count ?? 0) / PAGE));
 
   const href = (p: number): string => {
     const q = new URLSearchParams();
-    if (paper) q.set("paper", paper);
-    if (status) q.set("status", status);
-    if (review) q.set("review", review);
-    if (text) q.set("q", text);
+    for (const [k, v] of Object.entries(searchParams)) if (k !== "page" && typeof v === "string") q.set(k, v);
     if (p > 1) q.set("page", String(p));
     const s = q.toString();
     return s ? `/admin/questions?${s}` : "/admin/questions";
   };
-  const field = "rounded-lg border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-primary";
 
   return (
     <section>
@@ -53,49 +71,16 @@ export default async function QuestionsPage({ searchParams }: { searchParams: SP
         <Link href="/admin/questions/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-ink">New question</Link>
       </div>
 
-      <form method="get" className="mt-4 grid gap-2 rounded-xl border border-line bg-surface p-3 sm:grid-cols-2 md:grid-cols-5">
-        <select name="paper" defaultValue={paper} className={field} aria-label="Paper">
-          <option value="">All papers</option>
-          {(papers.data ?? []).map((p: any) => <option key={p.id} value={p.id}>{paperLabel(p)} ({p.id})</option>)}
-        </select>
-        <select name="status" defaultValue={status} className={field} aria-label="Publish status">
-          <option value="">Draft and published</option>
-          <option value="published">Published</option>
-          <option value="draft">Draft</option>
-        </select>
-        <select name="review" defaultValue={review} className={field} aria-label="Review status">
-          <option value="">Any review status</option>
-          <option value="verified">Verified</option>
-          <option value="draft">Not verified</option>
-        </select>
-        <input name="q" defaultValue={text} placeholder="Search question text" className={field} aria-label="Search" />
-        <button type="submit" className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Filter</button>
-      </form>
+      <div className="mt-4">
+        <AdminQBar subjects={subjects} subject={subject} units={units} papers={papers} />
+      </div>
 
-      {error && <p role="alert" className="mt-4 text-sm text-danger">{error.message}</p>}
-      <p className="mt-4 text-sm text-muted">{count ?? 0} question(s){pages > 1 ? `, page ${page} of ${pages}` : ""}</p>
+      {error && <p role="alert" className="mt-4 text-sm text-danger">{error.message}. Run supabase/migrations/0008_exams.sql if you haven't.</p>}
+      <p className="mt-4 text-sm text-muted" aria-live="polite">{count ?? 0} question(s){pages > 1 ? `, page ${page} of ${pages}` : ""}</p>
 
-      <ul className="mt-3 space-y-2">
-        {rows.map((r) => {
-          const k: any = Array.isArray(r.question_keys) ? r.question_keys[0] : r.question_keys;
-          return (
-            <li key={r.id}>
-              <Link href={`/admin/questions/${r.id}`} className="block rounded-xl border border-line bg-surface p-3 hover:border-primary">
-                <span className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="font-semibold">{r.id}</span>
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${r.publish_status === "published" ? "bg-good/10 text-good" : "bg-ochre/15 text-[#7A5410]"}`}>{r.publish_status}</span>
-                  {r.review_status === "verified" && <span className="text-xs text-good">verified</span>}
-                  {k?.explanation_status === "none" && <span className="text-xs text-muted">no explanation</span>}
-                  {k && ["dropped", "disputed", "provisional", "multiple"].includes(k.answer_status) && <span className="text-xs text-[#7A5410]">{k.answer_status}</span>}
-                </span>
-                <span className="mt-1 line-clamp-2 block text-[15px]">{r.text || "(no text)"}</span>
-                <span className="mt-1 block text-xs text-muted">{r.primary_topic_id ?? r.primary_unit_id}</span>
-              </Link>
-            </li>
-          );
-        })}
-        {rows.length === 0 && !error && <li className="rounded-xl border border-dashed border-line p-6 text-center text-muted">No questions match.</li>}
-      </ul>
+      <div className="mt-2">
+        <QuestionsList rows={rows} units={units} />
+      </div>
 
       {pages > 1 && (
         <nav aria-label="Pagination" className="mt-6 flex items-center justify-between">

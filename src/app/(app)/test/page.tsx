@@ -1,16 +1,22 @@
 import Link from "next/link";
 import { TestBuilder, type BuilderUnit } from "@/components/test/TestBuilder";
 import { createClient } from "@/lib/supabase/server";
-import { DEFAULT_SUBJECT, getTaxonomy } from "@/lib/taxonomy";
+import { getSubjects, getTaxonomy, pickSubject } from "@/lib/taxonomy";
 
 export const metadata = { title: "Tests" };
 
-export default async function TestPage() {
+type SP = { [key: string]: string | string[] | undefined };
+
+export default async function TestPage({ searchParams }: { searchParams: SP }) {
   const supabase = createClient();
-  const [{ units, years }, counts, perfRows, inprog] = await Promise.all([
-    getTaxonomy(supabase),
-    supabase.rpc("test_counts", { p_subject: DEFAULT_SUBJECT }),
-    supabase.from("my_topic_performance").select("unit_id, topic_id, attempted, correct").eq("subject_id", DEFAULT_SUBJECT),
+  const subjects = await getSubjects(supabase);
+  const wanted = Array.isArray(searchParams.subject) ? searchParams.subject[0] : searchParams.subject;
+  const subject = pickSubject(subjects, wanted);
+
+  const [{ units, exams }, counts, perfRows, inprog] = await Promise.all([
+    getTaxonomy(supabase, subject),
+    supabase.rpc("test_counts", { p_subject: subject }),
+    supabase.from("my_topic_performance").select("unit_id, topic_id, attempted, correct").eq("subject_id", subject),
     supabase.from("attempts").select("id, deadline_at, question_ids").eq("status", "in_progress").order("started_at", { ascending: false }).limit(1),
   ]);
 
@@ -45,7 +51,7 @@ export default async function TestPage() {
   return (
     <section>
       <h1 className="font-serif text-2xl font-bold md:text-3xl">Tests</h1>
-      <p className="mt-1 max-w-prose text-muted">Pick years, units or topics. Each question gets 72 seconds and 2 marks. Answers and explanations appear after you submit.</p>
+      <p className="mt-1 max-w-prose text-muted">Pick exams, units or topics. Each question gets 72 seconds and 2 marks. Answers and explanations appear after you submit.</p>
 
       {running && (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ochre/50 bg-ochre/15 p-4">
@@ -54,7 +60,7 @@ export default async function TestPage() {
         </div>
       )}
 
-      {counts.error && <p role="alert" className="mt-4 text-sm text-danger">{counts.error.message}. Run supabase/migrations/0007_tests.sql if you haven't.</p>}
+      {counts.error && <p role="alert" className="mt-4 text-sm text-danger">{counts.error.message}. Run supabase/migrations/0007_tests.sql and 0008_exams.sql if you haven't.</p>}
 
       {totalQuestions === 0 && !counts.error ? (
         <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
@@ -62,8 +68,8 @@ export default async function TestPage() {
           <p className="mt-1 text-sm text-muted">Publish some from Admin, then come back to take a test.</p>
         </div>
       ) : (
-        <div className="mt-6">
-          <TestBuilder subject={DEFAULT_SUBJECT} units={data} years={years} />
+        <div className="mt-4">
+          <TestBuilder key={subject} subjects={subjects} subject={subject} units={data} exams={exams} />
         </div>
       )}
     </section>

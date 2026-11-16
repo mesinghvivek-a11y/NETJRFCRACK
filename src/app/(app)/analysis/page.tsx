@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { SubjectSwitch } from "@/components/filters/SubjectSwitch";
 import { createClient } from "@/lib/supabase/server";
-import { DEFAULT_SUBJECT, getTaxonomy } from "@/lib/taxonomy";
+import { getSubjects, getTaxonomy, pickSubject } from "@/lib/taxonomy";
 
 export const metadata = { title: "My analysis" };
 
@@ -14,12 +15,15 @@ function verdict(attempted: number, correct: number): { label: string; cls: stri
   return { label: "Improving", cls: "text-[#7A5410]", pct };
 }
 
-export default async function AnalysisPage() {
+export default async function AnalysisPage({ searchParams }: { searchParams: { [key: string]: string | string[] | undefined } }) {
   const supabase = createClient();
+  const subjects = await getSubjects(supabase);
+  const wanted = Array.isArray(searchParams.subject) ? searchParams.subject[0] : searchParams.subject;
+  const subject = pickSubject(subjects, wanted);
   const [{ units }, attempts, perf] = await Promise.all([
-    getTaxonomy(supabase),
-    supabase.from("attempts").select("id, started_at, submitted_at, total_marks, score, correct_count, attempted_count, question_ids").eq("status", "submitted").order("submitted_at", { ascending: false }).limit(50),
-    supabase.from("my_topic_performance").select("unit_id, topic_id, seen, attempted, correct, time_sec").eq("subject_id", DEFAULT_SUBJECT),
+    getTaxonomy(supabase, subject),
+    supabase.from("attempts").select("id, started_at, submitted_at, total_marks, score, correct_count, attempted_count, question_ids").eq("status", "submitted").eq("subject_id", subject).order("submitted_at", { ascending: false }).limit(50),
+    supabase.from("my_topic_performance").select("unit_id, topic_id, seen, attempted, correct, time_sec").eq("subject_id", subject),
   ]);
   const list: any[] = attempts.data ?? [];
   const rows: any[] = perf.data ?? [];
@@ -27,7 +31,10 @@ export default async function AnalysisPage() {
   if (list.length === 0) {
     return (
       <section>
-        <h1 className="font-serif text-2xl font-bold md:text-3xl">My analysis</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-serif text-2xl font-bold md:text-3xl">My analysis</h1>
+          <SubjectSwitch subjects={subjects} subject={subject} />
+        </div>
         <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
           <p className="font-medium">No tests yet.</p>
           <p className="mt-1 text-sm text-muted">Your scores, weak topics and strong topics will appear here after your first test.</p>
@@ -74,7 +81,10 @@ export default async function AnalysisPage() {
 
   return (
     <section>
-      <h1 className="font-serif text-2xl font-bold md:text-3xl">My analysis</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-serif text-2xl font-bold md:text-3xl">My analysis</h1>
+        <SubjectSwitch subjects={subjects} subject={subject} />
+      </div>
       <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         {cards.map((c) => (
           <div key={c.label} className="rounded-xl border border-line bg-surface p-4">

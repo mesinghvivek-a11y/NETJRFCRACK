@@ -77,6 +77,20 @@ export function BatchTable({ batchId, status, summary, unitsBySubject, paperSubj
     }
   }
 
+  async function removeSelected() {
+    const ids = Array.from(sel);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Remove ${ids.length} row(s) from this review list? They will not be published.`)) return;
+    setBusy(true);
+    setMsg(null);
+    const { error } = await createClient().from("staged_questions").delete().in("id", ids);
+    setBusy(false);
+    if (error) { setMsg({ ok: false, text: error.message }); return; }
+    setSel(new Set());
+    setMsg({ ok: true, text: `Removed ${ids.length} row(s).` });
+    router.refresh();
+  }
+
   async function publish() {
     if (!window.confirm(`Publish ${okCount} question(s) now? Students will see them straight away.${n("error") ? ` ${n("error")} row(s) with errors will be skipped.` : ""}`)) return;
     setBusy(true);
@@ -142,6 +156,7 @@ export function BatchTable({ batchId, status, summary, unitsBySubject, paperSubj
           </select>
           <button type="button" disabled={busy} onClick={() => bulk("topic")} className="rounded-lg bg-ink px-3 py-1.5 font-medium text-white disabled:opacity-60">Set main topic</button>
           <button type="button" disabled={busy} onClick={() => bulk("verified")} className="rounded-lg border border-line px-3 py-1.5 font-medium">Mark verified</button>
+          <button type="button" disabled={busy} onClick={removeSelected} className="rounded-lg border border-line px-3 py-1.5 font-medium text-danger">Remove from list</button>
         </div>
       )}
 

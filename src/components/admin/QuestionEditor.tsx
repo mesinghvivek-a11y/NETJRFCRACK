@@ -175,6 +175,15 @@ export function QuestionEditor({ initial, unitsBySubject, paperSubjects, default
     }
   }
 
+  async function removeQuestion() {
+    if (!window.confirm(`Delete ${withId.id} for good? Students' saved test scores stay, but this question disappears from their reviews.`)) return;
+    setBusy(true);
+    const { error } = await createClient().rpc("admin_delete_questions", { p_ids: [withId.id] });
+    setBusy(false);
+    if (error) setMsg({ ok: false, text: error.message });
+    else router.replace("/admin/questions");
+  }
+
   const backHref = mode.kind === "staged" ? `/admin/batches/${mode.batchId}` : "/admin/questions";
   const topicsOf = (unitId: string) => units.find((u) => u.id === unitId)?.topics ?? [];
 
@@ -422,6 +431,7 @@ export function QuestionEditor({ initial, unitsBySubject, paperSubjects, default
             </button>
           </>
         )}
+        {mode.kind === "live" && !isNew && <button type="button" onClick={removeQuestion} disabled={busy} className="rounded-lg border border-line px-4 py-2.5 text-sm font-medium text-danger disabled:opacity-60">Delete</button>}
         {errors.length > 0 && mode.kind === "live" && <span className="text-sm text-danger">Fix the errors above to save.</span>}
         {msg && <span role="status" className={`text-sm ${msg.ok ? "text-good" : "text-danger"}`}>{msg.text}</span>}
       </div>

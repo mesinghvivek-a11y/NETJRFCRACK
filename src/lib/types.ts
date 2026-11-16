@@ -12,7 +12,7 @@ export interface BrowseItem {
   format: string;
   body: { en: Lang; hi?: Lang };
   options: { key: "A" | "B" | "C" | "D"; en: Lang; hi?: Lang }[];
-  paper: { year: number; session: "june" | "december"; exam_kind: "regular" | "reexam"; shift: number };
+  paper: { id: string; year: number; session: "june" | "december"; exam_kind: "regular" | "reexam"; shift: number };
   primary: { unit_id: string; topic_id: string | null };
   tags: { unit_id: string; topic_id: string | null }[];
   passage: { en: Lang } | null;

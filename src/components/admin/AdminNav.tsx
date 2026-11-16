@@ -7,6 +7,7 @@ const items = [
   { href: "/admin", label: "Overview", exact: true },
   { href: "/admin/import", label: "Import Excel" },
   { href: "/admin/syllabus", label: "Syllabus" },
+  { href: "/admin/papers", label: "Papers" },
   { href: "/admin/questions", label: "Questions" },
   { href: "/admin/images", label: "Images" },
   { href: "/admin/reports", label: "Reports" },

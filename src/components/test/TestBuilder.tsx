@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, SlidersHorizontal } from "lucide-react";
+import { ActiveFilters, ExamChips, SearchField, SelectField, StickyBar } from "@/components/filters/Controls";
 import { createClient } from "@/lib/supabase/client";
+import type { ExamInfo } from "@/lib/papers";
+import type { SubjectInfo } from "@/lib/taxonomy";
 
 interface Perf { attempted: number; correct: number }
 export interface BuilderTopic { id: string; name: string; count: number; perf: Perf | null }
@@ -27,11 +30,13 @@ function span(n: number): string {
   return h ? `${h} h ${m} min` : `${m} min`;
 }
 
-export function TestBuilder({ subject, units, years }: { subject: string; units: BuilderUnit[]; years: number[] }) {
+export function TestBuilder({ subjects, subject, units, exams }: { subjects: SubjectInfo[]; subject: string; units: BuilderUnit[]; exams: ExamInfo[] }) {
   const router = useRouter();
-  const [selYears, setSelYears] = useState<number[]>([]);
+  const [selPapers, setSelPapers] = useState<string[]>([]);
   const [selUnits, setSelUnits] = useState<string[]>([]);
   const [selTopics, setSelTopics] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [more, setMore] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [total, setTotal] = useState<number | null>(null);
   const [asked, setAsked] = useState(100);
@@ -41,26 +46,29 @@ export function TestBuilder({ subject, units, years }: { subject: string; units:
 
   const n = Math.min(total ?? 0, Math.max(1, asked));
   const none = selUnits.length === 0 && selTopics.length === 0;
+  const cleanSearch = search.replace(/[%\\]/g, "").trim();
+
+  const args = (withIds: boolean) => ({
+    p_subject: subject,
+    p_papers: selPapers.length ? selPapers : null,
+    p_units: selUnits.length ? selUnits : null,
+    p_topics: selTopics.length ? selTopics : null,
+    p_search: cleanSearch || null,
+    p_with_ids: withIds,
+  });
 
   // Count the matching questions whenever the selection changes.
   useEffect(() => {
     let live = true;
     setTotal(null);
     const t = window.setTimeout(async () => {
-      const { data, error } = await createClient().rpc("test_pool", {
-        p_subject: subject,
-        p_years: selYears.length ? selYears : null,
-        p_units: selUnits.length ? selUnits : null,
-        p_topics: selTopics.length ? selTopics : null,
-        p_with_ids: false,
-      });
+      const { data, error } = await createClient().rpc("test_pool", args(false));
       if (!live) return;
       if (error) { setErr(error.message); setTotal(0); } else { setErr(null); setTotal((data as any).total as number); }
     }, 300);
     return () => { live = false; window.clearTimeout(t); };
-  }, [subject, selYears, selUnits, selTopics]);
-
-  const toggleYear = (y: number) => setSelYears((p) => (p.includes(y) ? p.filter((x) => x !== y) : [...p, y]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subject, selPapers, selUnits, selTopics, cleanSearch]);
 
   function toggleUnit(u: BuilderUnit) {
     setSelTopics((p) => p.filter((t) => !u.topics.some((x) => x.id === t)));
@@ -76,57 +84,79 @@ export function TestBuilder({ subject, units, years }: { subject: string; units:
     }
   }
 
+  // The two dropdowns at the top are a quick way to pick one unit or one topic.
+  const topicUnit = selTopics.length === 1 && selUnits.length === 0 ? units.find((u) => u.topics.some((t) => t.id === selTopics[0])) : undefined;
+  const quickUnit = selUnits.length === 1 && selTopics.length === 0 ? selUnits[0] : topicUnit ? topicUnit.id : "";
+  const quickTopic = topicUnit ? selTopics[0] : "";
+  const mixed = !none && quickUnit === "";
+  const quickTopics = units.find((u) => u.id === quickUnit)?.topics ?? [];
+
+  function pickUnit(id: string) {
+    setSelTopics([]);
+    setSelUnits(id ? [id] : []);
+  }
+  function pickTopic(id: string) {
+    if (id) { setSelUnits([]); setSelTopics([id]); }
+    else { setSelTopics([]); setSelUnits(quickUnit ? [quickUnit] : []); }
+  }
+
   async function start() {
     setBusy(true);
     setErr(null);
     const supabase = createClient();
-    const pool = await supabase.rpc("test_pool", {
-      p_subject: subject,
-      p_years: selYears.length ? selYears : null,
-      p_units: selUnits.length ? selUnits : null,
-      p_topics: selTopics.length ? selTopics : null,
-      p_with_ids: true,
-    });
+    const pool = await supabase.rpc("test_pool", args(true));
     if (pool.error) { setBusy(false); setErr(pool.error.message); return; }
     const ids = ((pool.data as any).ids as string[]) ?? [];
     const picked = (mix ? shuffle(ids) : ids).slice(0, n);
     const { data, error } = await supabase.rpc("start_attempt", {
       p_subject_id: subject,
       p_question_ids: picked,
-      p_scope: { years: selYears, units: selUnits, topics: selTopics, count: picked.length },
+      p_scope: { papers: selPapers, units: selUnits, topics: selTopics, search: cleanSearch, count: picked.length },
     });
     if (error) { setBusy(false); setErr(error.message); return; }
     router.push(`/exam/${(data as any).attempt_id}`);
   }
 
+  const chips = useMemo(() => {
+    const out: { label: string; onRemove: () => void }[] = [];
+    for (const id of selPapers) out.push({ label: exams.find((e) => e.id === id)?.label ?? id, onRemove: () => setSelPapers((p) => p.filter((x) => x !== id)) });
+    if (cleanSearch) out.push({ label: `"${cleanSearch}"`, onRemove: () => setSearch("") });
+    if (!none) out.push({ label: `${selUnits.length + selTopics.length} unit or topic selected`, onRemove: () => { setSelUnits([]); setSelTopics([]); } });
+    return out;
+  }, [selPapers, cleanSearch, none, selUnits, selTopics, exams]);
+
   const sizes = [10, 25, 50, 100];
   const rowCls = "flex items-center gap-3 rounded-lg px-2 py-2";
 
-  const description = useMemo(() => {
-    const parts: string[] = [];
-    parts.push(selYears.length ? `years ${[...selYears].sort((a, b) => b - a).join(", ")}` : "all years");
-    parts.push(none ? "the whole syllabus" : `${selUnits.length + selTopics.length} selected unit or topic item(s)`);
-    return parts.join(", ");
-  }, [selYears, none, selUnits, selTopics]);
-
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-line bg-surface p-4">
-        <h2 className="font-semibold">Years</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setSelYears([])} aria-pressed={selYears.length === 0} className={`rounded-full border px-3 py-1 text-sm font-medium ${selYears.length === 0 ? "border-ink bg-ink text-white" : "border-line text-muted"}`}>All years</button>
-          {years.map((y) => (
-            <button key={y} type="button" onClick={() => toggleYear(y)} aria-pressed={selYears.includes(y)} className={`rounded-full border px-3 py-1 text-sm font-medium ${selYears.includes(y) ? "border-ink bg-ink text-white" : "border-line text-muted"}`}>{y}</button>
-          ))}
+      <StickyBar>
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-2 md:grid-cols-[12rem_minmax(0,1fr)_auto]">
+          <SelectField label="Subject" value={subject} onChange={(v) => router.push(`/test?subject=${v}`)} options={subjects.map((s) => ({ value: s.id, label: s.name }))} />
+          <SearchField value={search} onCommit={setSearch} placeholder="Search question text" />
+          <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more} aria-label="More filters" className={`rounded-lg border px-3 ${more ? "border-ink bg-ink text-white" : "border-line bg-surface text-muted"}`}>
+            <SlidersHorizontal size={18} aria-hidden="true" />
+          </button>
         </div>
-      </section>
+        <ExamChips exams={exams} selected={selPapers} onChange={setSelPapers} />
+        {more && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block min-w-0">
+              <span className="sr-only">Unit</span>
+              <select aria-label="Unit" value={quickUnit} onChange={(e) => pickUnit(e.target.value)} className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-[15px] outline-none focus:border-primary">
+                <option value="">{mixed ? "Several selected below" : "All units"}</option>
+                {units.map((u) => <option key={u.id} value={u.id}>Unit {u.number}: {u.name}</option>)}
+              </select>
+            </label>
+            <SelectField label="Topic" value={quickTopic} disabled={!quickUnit} onChange={pickTopic} placeholder={quickUnit ? "All topics in this unit" : "Pick a unit first"} options={quickTopics.filter((t) => t.count > 0).map((t) => ({ value: t.id, label: t.name }))} />
+          </div>
+        )}
+        <ActiveFilters chips={chips} onClear={() => { setSelPapers([]); setSelUnits([]); setSelTopics([]); setSearch(""); }} />
+      </StickyBar>
 
       <section className="rounded-xl border border-line bg-surface p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="font-semibold">Units and topics</h2>
-          {!none && <button type="button" onClick={() => { setSelUnits([]); setSelTopics([]); }} className="text-sm font-medium text-primary-ink underline underline-offset-4">Clear</button>}
-        </div>
-        <p className="mt-1 text-sm text-muted">Leave everything unticked for the whole syllabus. Your score so far is shown on each row.</p>
+        <h2 className="font-semibold">Units and topics</h2>
+        <p className="mt-1 text-sm text-muted">Tick as many as you like. Leave everything unticked for the whole syllabus. Your score so far is shown on each row.</p>
         <ul className="mt-3 divide-y divide-line">
           {units.map((u) => {
             const isOpen = open[u.id] ?? false;
@@ -144,7 +174,7 @@ export function TestBuilder({ subject, units, years }: { subject: string; units:
                   </button>
                 </div>
                 {isOpen && (
-                  <ul className="ml-8 mb-2 space-y-0.5 border-l border-line pl-3">
+                  <ul className="mb-2 ml-8 space-y-0.5 border-l border-line pl-3">
                     {u.topics.map((t) => (
                       <li key={t.id} className={`${rowCls} ${t.count === 0 ? "opacity-50" : ""}`}>
                         <input type="checkbox" className="h-5 w-5 shrink-0" checked={unitOn || selTopics.includes(t.id)} disabled={t.count === 0} onChange={() => toggleTopic(u, t)} aria-label={t.name} />
@@ -163,13 +193,12 @@ export function TestBuilder({ subject, units, years }: { subject: string; units:
       </section>
 
       <section className="sticky bottom-[calc(4.25rem+env(safe-area-inset-bottom))] z-10 rounded-xl border border-line bg-surface p-4 shadow-sm md:bottom-4">
-        <p className="text-sm text-muted">{description}</p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">Questions</span>
           {sizes.map((s) => (
             <button key={s} type="button" onClick={() => setAsked(s)} aria-pressed={asked === s} className={`rounded-full border px-3 py-1 text-sm font-medium ${asked === s ? "border-ink bg-ink text-white" : "border-line text-muted"}`}>{s}</button>
           ))}
-          <button type="button" onClick={() => setAsked(total ?? 100)} aria-pressed={total !== null && asked === total && !sizes.includes(asked)} className="rounded-full border border-line px-3 py-1 text-sm font-medium text-muted">All</button>
+          <button type="button" onClick={() => setAsked(total ?? 100)} className="rounded-full border border-line px-3 py-1 text-sm font-medium text-muted">All</button>
           <label className="ml-auto flex items-center gap-2 text-sm"><input type="checkbox" checked={mix} onChange={() => setMix((v) => !v)} /> Shuffle</label>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-3">

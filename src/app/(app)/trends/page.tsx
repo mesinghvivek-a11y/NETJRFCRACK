@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { SubjectSwitch } from "@/components/filters/SubjectSwitch";
+import { compareOldestFirst, examLabel, isReexam } from "@/lib/papers";
 import { createClient } from "@/lib/supabase/server";
-import { DEFAULT_SUBJECT, getTaxonomy } from "@/lib/taxonomy";
+import { getSubjects, getTaxonomy, pickSubject } from "@/lib/taxonomy";
 
 export const metadata = { title: "Trends" };
 
 type SP = { [key: string]: string | string[] | undefined };
+const one = (v: string | string[] | undefined): string => (Array.isArray(v) ? v[0] ?? "" : v ?? "");
 
 function slope(values: number[]): number {
   const n = values.length;
@@ -21,7 +24,7 @@ function Spark({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
   const pts = values.map((v, i) => `${(i * 112) / (values.length - 1) + 4},${28 - (v / max) * 24}`).join(" ");
   return (
-    <svg viewBox="0 0 120 32" className="h-8 w-28" role="img" aria-label="Share of each year's questions over time">
+    <svg viewBox="0 0 120 32" className="h-8 w-28" role="img" aria-label="Share of each exam's questions over time">
       <polyline fill="none" stroke="#0F6E7C" strokeWidth="2" points={pts} />
     </svg>
   );
@@ -29,18 +32,28 @@ function Spark({ values }: { values: number[] }) {
 
 export default async function TrendsPage({ searchParams }: { searchParams: SP }) {
   const supabase = createClient();
-  const pctView = (Array.isArray(searchParams.view) ? searchParams.view[0] : searchParams.view) === "pct";
+  const subjects = await getSubjects(supabase);
+  const subject = pickSubject(subjects, one(searchParams.subject));
+  const pctView = one(searchParams.view) === "pct";
   const [{ units }, stats] = await Promise.all([
-    getTaxonomy(supabase),
-    supabase.from("stats_topic_year").select("year, unit_id, topic_id, n").eq("subject_id", DEFAULT_SUBJECT).limit(5000),
+    getTaxonomy(supabase, subject),
+    supabase.from("stats_topic_paper").select("paper_id, unit_id, topic_id, n").eq("subject_id", subject).limit(10000),
   ]);
   const rows: any[] = stats.data ?? [];
-  const years = Array.from(new Set<number>(rows.map((r) => r.year as number))).sort((a: number, b: number) => a - b);
+  // Every paper is its own column, so three shifts in one year are three columns of about 100 questions each.
+  const exams: string[] = Array.from(new Set<string>(rows.map((r) => r.paper_id as string))).sort((a, b) => compareOldestFirst({ id: a }, { id: b }));
+
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h1 className="font-serif text-2xl font-bold md:text-3xl">Trends</h1>
+      <SubjectSwitch subjects={subjects} subject={subject} />
+    </div>
+  );
 
   if (rows.length === 0) {
     return (
       <section>
-        <h1 className="font-serif text-2xl font-bold md:text-3xl">Trends</h1>
+        {header}
         <div className="mt-8 rounded-xl border border-dashed border-line p-8 text-center">
           <p className="font-medium">No published questions yet.</p>
           <p className="mt-1 text-sm text-muted">Trends build themselves as papers are published.</p>
@@ -49,37 +62,38 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
     );
   }
 
-  const yearTotal = new Map<number, number>();
-  const unitYear = new Map<string, number>();
-  const topicYear = new Map<string, number>();
+  const examTotal = new Map<string, number>();
+  const unitExam = new Map<string, number>();
+  const topicExam = new Map<string, number>();
   for (const r of rows) {
-    yearTotal.set(r.year, (yearTotal.get(r.year) ?? 0) + r.n);
-    unitYear.set(`${r.unit_id}|${r.year}`, (unitYear.get(`${r.unit_id}|${r.year}`) ?? 0) + r.n);
-    if (r.topic_id) topicYear.set(`${r.topic_id}|${r.year}`, (topicYear.get(`${r.topic_id}|${r.year}`) ?? 0) + r.n);
+    examTotal.set(r.paper_id, (examTotal.get(r.paper_id) ?? 0) + r.n);
+    unitExam.set(`${r.unit_id}|${r.paper_id}`, (unitExam.get(`${r.unit_id}|${r.paper_id}`) ?? 0) + r.n);
+    if (r.topic_id) topicExam.set(`${r.topic_id}|${r.paper_id}`, (topicExam.get(`${r.topic_id}|${r.paper_id}`) ?? 0) + r.n);
   }
-  const grand = Array.from(yearTotal.values()).reduce((a, b) => a + b, 0);
-  const lastYear = years[years.length - 1];
+  const grand = Array.from(examTotal.values()).reduce((a, b) => a + b, 0);
+  const lastIdx = exams.length - 1;
 
-  const cell = (n: number, year: number): string => {
+  const cell = (n: number, paper: string): string => {
     if (!pctView) return n ? String(n) : "-";
-    const t = yearTotal.get(year) ?? 0;
+    const t = examTotal.get(paper) ?? 0;
     return n && t ? `${Math.round((n / t) * 100)}%` : "-";
   };
 
   const unitStats = units.map((u) => {
-    const counts = years.map((y) => unitYear.get(`${u.id}|${y}`) ?? 0);
-    const shares = years.map((y, i) => ((yearTotal.get(y) ?? 0) ? (counts[i] / (yearTotal.get(y) ?? 1)) * 100 : 0));
+    const counts = exams.map((e) => unitExam.get(`${u.id}|${e}`) ?? 0);
+    const shares = exams.map((e, i) => ((examTotal.get(e) ?? 0) ? (counts[i] / (examTotal.get(e) ?? 1)) * 100 : 0));
     const total = counts.reduce((a, b) => a + b, 0);
     const s = slope(shares);
     return {
       u, counts, shares, total,
       weight: grand ? Math.round((total / grand) * 1000) / 10 : 0,
-      trend: years.length < 3 ? "Not enough years" : s > 0.4 ? "Rising" : s < -0.4 ? "Falling" : "Steady",
+      trend: exams.length < 3 ? "Not enough exams" : s > 0.4 ? "Rising" : s < -0.4 ? "Falling" : "Steady",
       topics: u.topics.map((t) => {
-        const c = years.map((y) => topicYear.get(`${t.id}|${y}`) ?? 0);
+        const c = exams.map((e) => topicExam.get(`${t.id}|${e}`) ?? 0);
         const tot = c.reduce((a, b) => a + b, 0);
-        const last = [...years].reverse().find((_, i) => c[years.length - 1 - i] > 0);
-        return { t, c, tot, last: last ?? null, score: c.reduce((a, n, i) => a + n / (1 + (lastYear - years[i])), 0) };
+        let lastAt = -1;
+        c.forEach((n, i) => { if (n > 0) lastAt = i; });
+        return { t, c, tot, last: lastAt >= 0 ? examLabel(exams[lastAt]) : null, score: c.reduce((a, n, i) => a + n / (1 + (lastIdx - i)), 0) };
       }),
     };
   });
@@ -87,16 +101,24 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
   const allTopics = unitStats.flatMap((x) => x.topics.map((tp) => ({ ...tp, unit: x.u })));
   const priority = [...allTopics].filter((x) => x.tot > 0).sort((a, b) => b.score - a.score).slice(0, 10);
   const neverAsked = allTopics.filter((x) => x.tot === 0);
-  const trendCls: Record<string, string> = { Rising: "text-good", Falling: "text-danger", Steady: "text-muted", "Not enough years": "text-muted" };
+  const trendCls: Record<string, string> = { Rising: "text-good", Falling: "text-danger", Steady: "text-muted", "Not enough exams": "text-muted" };
+  const base = `/trends?subject=${subject}`;
+
+  const head = exams.map((e) => (
+    <th key={e} className="px-2 py-2 text-center font-medium" title={e}>
+      <span className="block whitespace-nowrap">{examLabel(e)}</span>
+      {isReexam(e) && <span className="block text-[10px] font-semibold uppercase text-[#7A5410]">re-exam</span>}
+    </th>
+  ));
 
   return (
     <section>
-      <h1 className="font-serif text-2xl font-bold md:text-3xl">Trends</h1>
-      <p className="mt-1 max-w-prose text-muted">How many questions each unit and topic has carried, year by year. Each question is counted once, under its main topic.</p>
+      {header}
+      <p className="mt-1 max-w-prose text-muted">How many questions each unit and topic carried in every exam. Each paper is its own column, and each question is counted once under its main topic.</p>
 
       <div className="mt-4 flex gap-2">
-        <Link href="/trends" aria-current={!pctView ? "page" : undefined} className={`rounded-full border px-3 py-1 text-sm font-medium ${!pctView ? "border-ink bg-ink text-white" : "border-line bg-surface text-muted"}`}>Counts</Link>
-        <Link href="/trends?view=pct" aria-current={pctView ? "page" : undefined} className={`rounded-full border px-3 py-1 text-sm font-medium ${pctView ? "border-ink bg-ink text-white" : "border-line bg-surface text-muted"}`}>Share of each year</Link>
+        <Link href={base} aria-current={!pctView ? "page" : undefined} className={`rounded-full border px-3 py-1 text-sm font-medium ${!pctView ? "border-ink bg-ink text-white" : "border-line bg-surface text-muted"}`}>Counts</Link>
+        <Link href={`${base}&view=pct`} aria-current={pctView ? "page" : undefined} className={`rounded-full border px-3 py-1 text-sm font-medium ${pctView ? "border-ink bg-ink text-white" : "border-line bg-surface text-muted"}`}>Share of each exam</Link>
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface">
@@ -104,7 +126,7 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
           <thead className="border-b border-line text-left text-muted">
             <tr>
               <th className="sticky left-0 bg-surface px-3 py-2 font-medium">Unit</th>
-              {years.map((y) => <th key={y} className="px-2 py-2 text-center font-medium">{y}</th>)}
+              {head}
               <th className="px-3 py-2 text-center font-medium">Total</th>
               <th className="px-3 py-2 font-medium">Weight</th>
               <th className="px-3 py-2 font-medium">Trend</th>
@@ -114,7 +136,7 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
             {unitStats.map((x) => (
               <tr key={x.u.id} className="border-b border-line last:border-0">
                 <td className="sticky left-0 max-w-[14rem] bg-surface px-3 py-2 font-medium"><span className="block truncate" title={x.u.name}>Unit {x.u.number}: {x.u.name}</span></td>
-                {x.counts.map((n, i) => <td key={years[i]} className="px-2 py-2 text-center">{cell(n, years[i])}</td>)}
+                {x.counts.map((n, i) => <td key={exams[i]} className="px-2 py-2 text-center">{cell(n, exams[i])}</td>)}
                 <td className="px-3 py-2 text-center font-semibold">{x.total}</td>
                 <td className="px-3 py-2">{x.weight}%</td>
                 <td className="px-3 py-2"><span className={`font-medium ${trendCls[x.trend]}`}>{x.trend}</span><Spark values={x.shares} /></td>
@@ -124,17 +146,16 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
           <tfoot className="border-t border-line text-muted">
             <tr>
               <td className="sticky left-0 bg-surface px-3 py-2 font-medium">All units</td>
-              {years.map((y) => <td key={y} className="px-2 py-2 text-center">{yearTotal.get(y)}</td>)}
+              {exams.map((e) => <td key={e} className="px-2 py-2 text-center">{examTotal.get(e)}</td>)}
               <td className="px-3 py-2 text-center font-semibold">{grand}</td>
               <td colSpan={2} />
             </tr>
           </tfoot>
         </table>
       </div>
-      <p className="mt-2 text-xs text-muted">Years with several shifts show more questions in total. Use "Share of each year" to compare fairly.</p>
 
       <h2 className="mt-8 font-serif text-xl font-bold">Study these first</h2>
-      <p className="mt-1 text-sm text-muted">Topics ranked by how often they were asked, with recent years counting more.</p>
+      <p className="mt-1 text-sm text-muted">Topics ranked by how often they were asked, with recent exams counting more.</p>
       <ol className="mt-3 space-y-2">
         {priority.map((p, i) => (
           <li key={p.t.id} className="flex items-center gap-3 rounded-xl border border-line bg-surface p-3">
@@ -158,7 +179,7 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
                   <thead className="text-left text-muted">
                     <tr>
                       <th className="px-3 py-2 font-medium">Topic</th>
-                      {years.map((y) => <th key={y} className="px-2 py-2 text-center font-medium">{y}</th>)}
+                      {head}
                       <th className="px-3 py-2 text-center font-medium">Total</th>
                       <th className="px-3 py-2 font-medium">Last</th>
                     </tr>
@@ -167,9 +188,9 @@ export default async function TrendsPage({ searchParams }: { searchParams: SP })
                     {[...x.topics].sort((a, b) => b.tot - a.tot).map((tp) => (
                       <tr key={tp.t.id} className="border-t border-line">
                         <td className="max-w-[16rem] px-3 py-2">{tp.t.name}</td>
-                        {tp.c.map((n, i) => <td key={years[i]} className="px-2 py-2 text-center">{cell(n, years[i])}</td>)}
+                        {tp.c.map((n, i) => <td key={exams[i]} className="px-2 py-2 text-center">{cell(n, exams[i])}</td>)}
                         <td className="px-3 py-2 text-center font-semibold">{tp.tot}</td>
-                        <td className="px-3 py-2 text-muted">{tp.last ?? "never"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted">{tp.last ?? "never"}</td>
                       </tr>
                     ))}
                   </tbody>

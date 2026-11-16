@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ReviewList, type ReviewItem } from "@/components/test/ReviewList";
-import { paperLabel } from "@/lib/admin/model";
+import { examLabel } from "@/lib/papers";
 import { createClient } from "@/lib/supabase/server";
 import { getTaxonomy } from "@/lib/taxonomy";
 
@@ -20,7 +20,7 @@ export default async function ResultPage({ params }: { params: { id: string } })
   const rev: any[] = (review.data as any[] | null) ?? [];
   const qs = await supabase
     .from("questions")
-    .select("id, q_no, body, options, primary_unit_id, primary_topic_id, papers(year, session, exam_kind, shift)")
+    .select("id, q_no, body, options, primary_unit_id, primary_topic_id, papers(id)")
     .in("id", attempt.question_ids);
   const byId = new Map<string, any>((qs.data ?? []).map((q: any) => [q.id as string, q]));
 
@@ -35,7 +35,7 @@ export default async function ResultPage({ params }: { params: { id: string } })
     if (!q) return;
     const paper = Array.isArray(q.papers) ? q.papers[0] : q.papers;
     items.push({
-      id: q.id, position, q_no: q.q_no, when: paper ? paperLabel(paper) : "", body: q.body, options: q.options,
+      id: q.id, position, q_no: q.q_no, when: paper ? examLabel(paper.id) : "", body: q.body, options: q.options,
       topic: (q.primary_topic_id && topicName.get(q.primary_topic_id)) || unitName.get(q.primary_unit_id) || "",
       selected: r.selected ?? null, is_correct: r.is_correct ?? null, time: r.time_spent_sec ?? 0, key: r.key ?? null,
     });

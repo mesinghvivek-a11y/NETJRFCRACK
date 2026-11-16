@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireAdmin } from "@/lib/admin/guard";
-import { paperLabel } from "@/lib/admin/model";
+import { compareNewestFirst, examLabel, isReexam } from "@/lib/papers";
 
 export default async function AdminHome() {
   const { supabase } = await requireAdmin();
@@ -10,7 +10,7 @@ export default async function AdminHome() {
     supabase.from("error_reports").select("id", { count: "exact", head: true }).eq("status", "open"),
     supabase.from("units").select("id", { count: "exact", head: true }),
   ]);
-  const papers: any[] = progress.data ?? [];
+  const papers: any[] = [...(progress.data ?? [])].map((p: any) => ({ ...p, id: p.paper_id as string })).sort(compareNewestFirst);
   const sum = (k: string): number => papers.reduce((n: number, p: any) => n + (p[k] ?? 0), 0);
   const staged = (batches.data ?? []).filter((b: any) => b.status === "staged");
 
@@ -57,7 +57,10 @@ export default async function AdminHome() {
         </div>
       )}
 
-      <h2 className="mt-8 font-serif text-xl font-bold">Papers</h2>
+      <div className="mt-8 flex items-center justify-between gap-3">
+        <h2 className="font-serif text-xl font-bold">Papers</h2>
+        <Link href="/admin/papers" className="text-sm font-medium text-primary-ink underline underline-offset-4">Manage or delete papers</Link>
+      </div>
       {papers.length === 0 ? (
         <p className="mt-2 text-muted">No papers yet. Use Import Excel to add your first one.</p>
       ) : (
@@ -78,7 +81,8 @@ export default async function AdminHome() {
                 return (
                   <tr key={p.paper_id} className="border-b border-line last:border-0">
                     <td className="px-3 py-2">
-                      <Link href={`/admin/questions?paper=${p.paper_id}`} className="font-medium text-primary-ink underline underline-offset-4">{paperLabel(p)}</Link>
+                      <Link href={`/admin/questions?paper=${p.paper_id}`} className="font-medium text-primary-ink underline underline-offset-4">{examLabel(p.paper_id)}</Link>
+                      {isReexam(p.paper_id) && <span className="ml-2 rounded bg-ochre/20 px-1 text-[10px] font-semibold uppercase text-[#7A5410]">re-exam</span>}
                       <span className="block text-xs text-muted">{p.paper_id}</span>
                     </td>
                     <td className={`px-3 py-2 ${have < p.total_questions ? "text-[#7A5410]" : ""}`}>{have} of {p.total_questions}</td>

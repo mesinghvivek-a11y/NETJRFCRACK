@@ -53,3 +53,9 @@ Import the GitHub repo, set the two `NEXT_PUBLIC_` variables, deploy, then add t
 2. Tests: Tests page > choose years, units or topics > Start test. The exam screen is at /exam/<id> (no site menu, like NTA).
 3. Each question is 72 seconds and 2 marks. The server owns the clock, answers save every 15 seconds and on this device, and the test submits itself when time runs out.
 4. My analysis: score history and weak/strong topics (after 5 attempts in a topic). Trends: counts per unit and topic per year, built from published questions.
+
+## 9. Exams as separate papers, filters, deleting (added)
+1. Supabase SQL Editor: run `supabase/migrations/0008_exams.sql` once (after 0007). It renames existing papers to the new code rule and carries their questions, tags, bookmarks and tests with them.
+2. Rule: one paper in a cycle = 80-2025-JUN-E; several = 80-2024-JUN-E-S1, -S2; re-exam adds -R. Admin > Papers shows every paper and has Fix paper codes.
+3. Admin > Papers: delete a whole paper. Admin > Questions: select several, then Publish, Unpublish, Verify, Move to unit or topic, or Delete.
+4. PYQs, Tests and Trends are per exam, with a subject selector.

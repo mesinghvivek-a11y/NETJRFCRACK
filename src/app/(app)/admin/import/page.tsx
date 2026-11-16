@@ -8,7 +8,7 @@ export default async function ImportPage() {
   const [unitsBySubject, subjects, papers] = await Promise.all([
     loadUnitsBySubject(supabase),
     supabase.from("subjects").select("id, nta_code"),
-    supabase.from("papers").select("id, total_questions, subject_id"),
+    supabase.from("papers").select("id, total_questions, subject_id, year, session, shift, exam_kind, language"),
   ]);
   return (
     <section>
@@ -20,7 +20,7 @@ export default async function ImportPage() {
         <ImportClient
           unitsBySubject={unitsBySubject}
           subjects={(subjects.data ?? []).map((s: any) => ({ id: s.id as string, code: (s.nta_code ?? "") as string }))}
-          existingPapers={(papers.data ?? []).map((p: any) => ({ id: p.id as string, total: p.total_questions as number, subject: p.subject_id as string }))}
+          existingPapers={(papers.data ?? []).map((p: any) => ({ id: p.id as string, total: p.total_questions as number, subject: p.subject_id as string, year: p.year as number, session: p.session as string, shift: p.shift as number, kind: p.exam_kind as string, language: p.language as string }))}
         />
       </div>
     </section>

@@ -37,20 +37,8 @@ export interface TaxUnit { id: string; number: number; name: string; topics: { i
 export interface Ctx { units: TaxUnit[]; passageIds?: Set<string>; paperTotal?: number }
 
 export const pad3 = (n: number): string => String(n).padStart(3, "0");
-/** Paper code, e.g. 80-2025-JUN-E. Shift 2 and later add -S2, a re-exam adds -R, so every paper stays unique. */
-export function paperCode(p: { subjectCode: string; year: number; session: string; language?: string; shift?: number; examKind?: string }): string {
-  if (!p.subjectCode || !Number.isInteger(p.year) || !["june", "december"].includes(p.session)) return "";
-  const lang = (p.language || "E").toUpperCase();
-  return `${p.subjectCode}-${p.year}-${p.session === "june" ? "JUN" : "DEC"}-${lang}${p.shift && p.shift > 1 ? `-S${p.shift}` : ""}${p.examKind === "reexam" ? "-R" : ""}`;
-}
-
 /** Question id = paper code + question number, e.g. 80-2025-JUN-E-045. */
 export const makeId = (paperId: string, qNo: number): string => `${paperId.toUpperCase()}-${pad3(qNo)}`;
-
-export function paperLabel(p: { year: number; session: string; exam_kind?: string; shift?: number }): string {
-  const s = p.session === "june" ? "June" : "December";
-  return `${s} ${p.year}${p.exam_kind === "reexam" ? " re-exam" : ""}${p.shift && p.shift > 1 ? `, shift ${p.shift}` : ""}`;
-}
 
 export function parseCode(raw: string): Tag | null {
   const code = raw.trim().toLowerCase();

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Bookmark, Check, Flag, Loader2, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { examLabel } from "@/lib/papers";
 import type { BrowseItem, Lang, Reveal } from "@/lib/types";
 
 const mediaUrl = (path: string) =>
@@ -69,7 +70,7 @@ export function QuestionCard({ item, primaryLabel, tagLabels }: { item: BrowseIt
   const [reportState, setReportState] = useState<"idle" | "sending" | "sent" | "error">("idle");
 
   const { paper } = item;
-  const when = `${paper.session === "june" ? "June" : "December"} ${paper.year}`;
+  const when = examLabel(paper.id);
 
   async function show(choice?: string) {
     if (open || loading) return;
@@ -128,7 +129,6 @@ export function QuestionCard({ item, primaryLabel, tagLabels }: { item: BrowseIt
           <span className="font-semibold">{when}</span>
           <span className="text-muted">Q{item.q_no}</span>
           {paper.exam_kind === "reexam" && <span className="rounded bg-ochre/15 px-1.5 py-0.5 text-xs font-medium text-[#7A5410]">Re-exam</span>}
-          {paper.shift > 1 && <span className="text-muted">Shift {paper.shift}</span>}
         </div>
         <div className="-mr-2 -mt-1 flex shrink-0">
           <button
